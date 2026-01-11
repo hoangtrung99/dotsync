@@ -1,0 +1,253 @@
+apps:
+  # AI Tools
+  - id: claude-code
+    name: Claude Code
+    category: ai
+    icon: "🤖"
+    config_paths:
+      - "~/.claude/settings.json"
+      - "~/.claude.json"
+      - "~/.claude/plugins/known_marketplaces.json"
+      - "~/.claude/plugins/installed_plugins.json"
+    encrypted_files:
+      - "settings.json"
+
+  - id: github-copilot
+    name: GitHub Copilot
+    category: ai
+    icon: "🐙"
+    config_paths:
+      - "~/.config/github-copilot"
+
+  # Terminal Emulators
+  - id: ghostty
+    name: Ghostty
+    category: terminal
+    icon: "👻"
+    config_paths:
+      - "~/.config/ghostty"
+
+  - id: kitty
+    name: Kitty
+    category: terminal
+    icon: "🐱"
+    config_paths:
+      - "~/.config/kitty"
+
+  - id: alacritty
+    name: Alacritty
+    category: terminal
+    icon: "🚀"
+    config_paths:
+      - "~/.config/alacritty"
+
+  - id: wezterm
+    name: WezTerm
+    category: terminal
+    icon: "🌐"
+    config_paths:
+      - "~/.config/wezterm"
+      - "~/.wezterm.lua"
+
+  - id: iterm2
+    name: iTerm2
+    category: terminal
+    icon: "📟"
+    config_paths:
+      - "~/.config/iterm2"
+
+  # Shells
+  - id: zsh
+    name: Zsh
+    category: shell
+    icon: "🐚"
+    config_paths:
+      - "~/.zshrc"
+      - "~/.zprofile"
+      - "~/.zshenv"
+
+  - id: bash
+    name: Bash
+    category: shell
+    icon: "💲"
+    config_paths:
+      - "~/.bashrc"
+      - "~/.bash_profile"
+
+  - id: fish
+    name: Fish
+    category: shell
+    icon: "🐟"
+    config_paths:
+      - "~/.config/fish"
+
+  - id: starship
+    name: Starship
+    category: shell
+    icon: "🚀"
+    config_paths:
+      - "~/.config/starship.toml"
+
+  - id: oh-my-zsh
+    name: Oh My Zsh
+    category: shell
+    icon: "✨"
+    config_paths:
+      - "~/.oh-my-zsh/custom"
+
+  # Editors
+  - id: nvim
+    name: Neovim
+    category: editor
+    icon: "📝"
+    config_paths:
+      - "~/.config/nvim"
+
+  - id: vim
+    name: Vim
+    category: editor
+    icon: "📗"
+    config_paths:
+      - "~/.vimrc"
+      - "~/.vim"
+
+  - id: zed
+    name: Zed
+    category: editor
+    icon: "⚡"
+    config_paths:
+      - "~/.config/zed/settings.json"
+      - "~/.config/zed/keymap.json"
+
+  - id: vscode
+    name: VS Code
+    category: editor
+    icon: "💠"
+    config_paths:
+      - "~/Library/Application Support/Code/User/settings.json"
+      - "~/Library/Application Support/Code/User/keybindings.json"
+
+  - id: cursor
+    name: Cursor
+    category: editor
+    icon: "🖱️"
+    config_paths:
+      - "~/Library/Application Support/Cursor/User/settings.json"
+
+  - id: emacs
+    name: Emacs
+    category: editor
+    icon: "🦬"
+    config_paths:
+      - "~/.emacs.d"
+      - "~/.emacs"
+
+  # Git
+  - id: git
+    name: Git
+    category: git
+    icon: "🔀"
+    config_paths:
+      - "~/.gitconfig"
+      - "~/.gitignore_global"
+
+  - id: lazygit
+    name: LazyGit
+    category: git
+    icon: "😴"
+    config_paths:
+      - "~/.config/lazygit"
+
+  # Dev Tools
+  - id: tmux
+    name: Tmux
+    category: dev
+    icon: "🪟"
+    config_paths:
+      - "~/.tmux.conf"
+      - "~/.config/tmux"
+
+  - id: npm
+    name: NPM
+    category: dev
+    icon: "📦"
+    config_paths:
+      - "~/.npmrc"
+
+  - id: yarn
+    name: Yarn
+    category: dev
+    icon: "🧶"
+    config_paths:
+      - "~/.yarnrc"
+      - "~/.yarnrc.yml"
+
+  - id: pip
+    name: Pip
+    category: dev
+    icon: "🐍"
+    config_paths:
+      - "~/.pip/pip.conf"
+      - "~/.config/pip/pip.conf"
+
+  - id: docker
+    name: Docker
+    category: dev
+    icon: "🐳"
+    config_paths:
+      - "~/.docker/config.json"
+
+  - id: ssh
+    name: SSH
+    category: dev
+    icon: "🔐"
+    config_paths:
+      - "~/.ssh/config"
+
+  - id: aws
+    name: AWS CLI
+    category: dev
+    icon: "☁️"
+    config_paths:
+      - "~/.aws/config"
+      - "~/.aws/credentials"
+    encrypted_files:
+      - "credentials"
+
+  # Other
+  - id: raycast
+    name: Raycast
+    category: other
+    icon: "🔦"
+    config_paths:
+      - "~/.config/raycast"
+
+  - id: karabiner
+    name: Karabiner
+    category: other
+    icon: "⌨️"
+    config_paths:
+      - "~/.config/karabiner"
+
+  - id: aerospace
+    name: AeroSpace
+    category: other
+    icon: "🪟"
+    config_paths:
+      - "~/.aerospace.toml"
+
+  - id: yabai
+    name: Yabai
+    category: other
+    icon: "🍃"
+    config_paths:
+      - "~/.yabairc"
+      - "~/.config/yabai"
+
+  - id: skhd
+    name: SKHD
+    category: other
+    icon: "⌨️"
+    config_paths:
+      - "~/.skhdrc"
+      - "~/.config/skhd"

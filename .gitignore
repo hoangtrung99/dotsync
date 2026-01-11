@@ -1,0 +1,34 @@
+# Binary
+dotsync
+dotsync.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Test
+coverage.out
+coverage.html
+*.test
+*.out
+
+# Build
+dist/
+bin/
+
+# Config (local)
+dotsync.json
