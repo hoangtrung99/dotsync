@@ -160,6 +160,7 @@ func UpdateSyncStatus(app *models.App, dotfilesPath string) {
 }
 
 // UpdateSyncStatusWithHashes updates sync status with hash-based conflict detection
+// This is optimized to use ModTime first, only computing hashes when there's a potential conflict
 func UpdateSyncStatusWithHashes(app *models.App, dotfilesPath string, stateManager *StateManager) {
 	appDir := filepath.Join(dotfilesPath, app.ID)
 
@@ -167,25 +168,55 @@ func UpdateSyncStatusWithHashes(app *models.App, dotfilesPath string, stateManag
 		file := &app.Files[i]
 		dotfilesFilePath := filepath.Join(appDir, file.RelPath)
 
-		// Compute hashes
-		localHash := ""
-		dotfilesHash := ""
+		// First, use fast ModTime-based comparison
+		file.SyncStatus = CompareFiles(file.Path, dotfilesFilePath)
+
+		// Only compute hashes if both files exist and ModTime suggests they're the same
+		// This avoids expensive hash computation in most cases
+		localExists := false
+		dotfilesExists := false
 
 		if _, err := os.Stat(file.Path); err == nil {
-			if file.IsDir {
-				localHash, _ = ComputeDirHash(file.Path)
-			} else {
-				localHash, _ = ComputeFileHash(file.Path)
-			}
+			localExists = true
+		}
+		if _, err := os.Stat(dotfilesFilePath); err == nil {
+			dotfilesExists = true
 		}
 
-		if _, err := os.Stat(dotfilesFilePath); err == nil {
-			if file.IsDir {
-				dotfilesHash, _ = ComputeDirHash(dotfilesFilePath)
-			} else {
-				dotfilesHash, _ = ComputeFileHash(dotfilesFilePath)
-			}
+		// Fast path: if one doesn't exist, no need to hash
+		if !localExists && !dotfilesExists {
+			file.ConflictType = models.ConflictNone
+			continue
 		}
+		if !localExists {
+			file.ConflictType = models.ConflictDotfilesNew
+			continue
+		}
+		if !dotfilesExists {
+			file.ConflictType = models.ConflictLocalNew
+			continue
+		}
+
+		// Both exist - use quick comparison first for files (skip large directories)
+		if file.IsDir {
+			// For directories, use ModTime-based status instead of hashing
+			// This is much faster for large directories like nvim configs
+			switch file.SyncStatus {
+			case models.StatusSynced:
+				file.ConflictType = models.ConflictNone
+			case models.StatusModified:
+				file.ConflictType = models.ConflictLocalModified
+			case models.StatusOutdated:
+				file.ConflictType = models.ConflictDotfilesModified
+			default:
+				file.ConflictType = models.ConflictNone
+			}
+			continue
+		}
+
+		// For regular files, compute hashes (they're usually small)
+		localHash, _ := ComputeFileHash(file.Path)
+		dotfilesHash, _ := ComputeFileHash(dotfilesFilePath)
 
 		file.LocalHash = localHash
 		file.DotfilesHash = dotfilesHash
@@ -197,9 +228,6 @@ func UpdateSyncStatusWithHashes(app *models.App, dotfilesPath string, stateManag
 			// Fallback: simple hash comparison without history
 			file.ConflictType = detectConflictSimple(localHash, dotfilesHash)
 		}
-
-		// Also update the legacy SyncStatus for backwards compatibility
-		file.SyncStatus = CompareFiles(file.Path, dotfilesFilePath)
 	}
 }
 

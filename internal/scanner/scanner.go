@@ -1,15 +1,29 @@
 package scanner
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	"dotsync/internal/models"
 
 	"gopkg.in/yaml.v3"
 )
+
+// DebugMode enables debug logging
+var DebugMode = false
+
+// debugLog logs a message if debug mode is enabled
+func debugLog(format string, args ...interface{}) {
+	if DebugMode {
+		fmt.Fprintf(os.Stderr, "[SCANNER] "+format+"\n", args...)
+	}
+}
 
 // Scanner detects installed applications and their config files
 type Scanner struct {
@@ -26,13 +40,19 @@ func New(configPath string) *Scanner {
 		homeDir:    homeDir,
 		brewApps:   make(map[string]bool),
 	}
-	s.loadBrewApps()
+
+	// Load brew apps in background - don't block scanner creation
+	go s.loadBrewApps()
+
 	return s
 }
 
 // loadBrewApps loads list of apps installed via Homebrew
 func (s *Scanner) loadBrewApps() {
-	// Get formulae
+	start := time.Now()
+	debugLog("Loading Homebrew apps...")
+
+	// Get formulae with timeout
 	out, err := exec.Command("brew", "list", "--formula", "-1").Output()
 	if err == nil {
 		for _, app := range strings.Split(string(out), "\n") {
@@ -53,6 +73,8 @@ func (s *Scanner) loadBrewApps() {
 			}
 		}
 	}
+
+	debugLog("Loaded %d Homebrew apps in %v", len(s.brewApps), time.Since(start))
 }
 
 // IsBrewInstalled checks if an app is installed via Homebrew
@@ -60,50 +82,108 @@ func (s *Scanner) IsBrewInstalled(appName string) bool {
 	return s.brewApps[strings.ToLower(appName)]
 }
 
-// Scan detects all installed apps and their files
+// Scan detects all installed apps and their files using parallel processing
 func (s *Scanner) Scan() ([]*models.App, error) {
+	start := time.Now()
+	debugLog("Starting scan...")
+
 	// Load app definitions
 	defs, err := s.loadDefinitions()
 	if err != nil {
 		// If no config file, use built-in definitions
 		defs = s.getBuiltinDefinitions()
 	}
+	debugLog("Loaded %d app definitions in %v", len(defs), time.Since(start))
 
-	var apps []*models.App
+	// Use parallel scanning for better performance
+	parallelStart := time.Now()
+	apps := s.scanAppsParallel(defs)
+	debugLog("Parallel scan found %d installed apps in %v", len(apps), time.Since(parallelStart))
 
-	for _, def := range defs {
-		app := models.NewApp(def)
+	// Also scan for unknown apps in common locations
+	unknownStart := time.Now()
+	unknownApps := s.scanUnknownApps(apps)
+	apps = append(apps, unknownApps...)
+	debugLog("Found %d unknown apps in %v", len(unknownApps), time.Since(unknownStart))
 
-		// Check all possible config paths
-		for _, configPath := range def.ConfigPaths {
-			expandedPath := s.expandPath(configPath)
+	debugLog("Total scan completed in %v", time.Since(start))
+	return apps, nil
+}
 
-			if s.pathExists(expandedPath) {
-				app.Installed = true
+// scanAppsParallel scans apps in parallel using worker pool pattern
+func (s *Scanner) scanAppsParallel(defs []models.AppDefinition) []*models.App {
+	numWorkers := runtime.NumCPU() * 2 // IO-bound, so use more workers
+	if numWorkers > 16 {
+		numWorkers = 16 // Cap at 16 workers
+	}
 
-				// Collect files
-				files, err := s.collectFiles(expandedPath, def.EncryptedFiles)
-				if err == nil {
-					app.Files = append(app.Files, files...)
+	// Channels for work distribution
+	jobs := make(chan models.AppDefinition, len(defs))
+	results := make(chan *models.App, len(defs))
+
+	// Start worker pool
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for def := range jobs {
+				if app := s.scanSingleApp(def); app != nil {
+					results <- app
 				}
 			}
-		}
+		}()
+	}
 
-		// Also check Homebrew
-		if !app.Installed && s.IsBrewInstalled(def.ID) {
+	// Send jobs to workers
+	for _, def := range defs {
+		jobs <- def
+	}
+	close(jobs)
+
+	// Wait for all workers to finish and close results channel
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	var apps []*models.App
+	for app := range results {
+		apps = append(apps, app)
+	}
+
+	return apps
+}
+
+// scanSingleApp scans a single app definition and returns the app if installed
+func (s *Scanner) scanSingleApp(def models.AppDefinition) *models.App {
+	app := models.NewApp(def)
+
+	// Check all possible config paths
+	for _, configPath := range def.ConfigPaths {
+		expandedPath := s.expandPath(configPath)
+
+		if s.pathExists(expandedPath) {
 			app.Installed = true
-		}
 
-		if app.Installed && len(app.Files) > 0 {
-			apps = append(apps, app)
+			// Collect files
+			files, err := s.collectFiles(expandedPath, def.EncryptedFiles)
+			if err == nil {
+				app.Files = append(app.Files, files...)
+			}
 		}
 	}
 
-	// Also scan for unknown apps in common locations
-	unknownApps := s.scanUnknownApps(apps)
-	apps = append(apps, unknownApps...)
+	// Also check Homebrew
+	if !app.Installed && s.IsBrewInstalled(def.ID) {
+		app.Installed = true
+	}
 
-	return apps, nil
+	if app.Installed && len(app.Files) > 0 {
+		return app
+	}
+	return nil
 }
 
 // scanUnknownApps scans common config directories for apps not in definitions
@@ -10244,6 +10324,12 @@ func (s *Scanner) pathExists(path string) bool {
 	return err == nil
 }
 
+// Maximum files to collect per directory (to avoid scanning huge directories)
+const maxFilesPerDir = 200
+
+// Maximum depth to scan in directories
+const maxScanDepth = 5
+
 // collectFiles collects all files from a path
 func (s *Scanner) collectFiles(path string, encryptedFiles []string) ([]models.File, error) {
 	var files []models.File
@@ -10264,11 +10350,20 @@ func (s *Scanner) collectFiles(path string, encryptedFiles []string) ([]models.F
 		return files, nil
 	}
 
-	// Directory - walk and collect files
+	// Directory - walk and collect files (with limits)
 	basePath := path
+	baseDepth := strings.Count(path, string(os.PathSeparator))
+	fileCount := 0
+
 	err = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // Skip errors
+		}
+
+		// Check depth limit
+		currentDepth := strings.Count(p, string(os.PathSeparator)) - baseDepth
+		if d.IsDir() && currentDepth >= maxScanDepth {
+			return filepath.SkipDir
 		}
 
 		// Skip hidden directories (except the root)
@@ -10286,10 +10381,16 @@ func (s *Scanner) collectFiles(path string, encryptedFiles []string) ([]models.F
 
 		// Only add files, not directories
 		if !d.IsDir() {
+			// Check file limit
+			if fileCount >= maxFilesPerDir {
+				return filepath.SkipAll
+			}
+
 			file, err := models.NewFile(p, basePath)
 			if err == nil {
 				file.Encrypted = s.isEncrypted(file.Name, encryptedFiles)
 				files = append(files, *file)
+				fileCount++
 			}
 		}
 

@@ -30,7 +30,15 @@ import (
 var (
 	version   = "dev"
 	buildTime = "unknown"
+	debugMode = false // Enable with --debug flag
 )
+
+// debugLog logs a message if debug mode is enabled
+func debugLog(format string, args ...interface{}) {
+	if debugMode {
+		fmt.Fprintf(os.Stderr, "[DEBUG] "+format+"\n", args...)
+	}
+}
 
 // Screen represents different screens in the app
 type Screen int
@@ -256,14 +264,30 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) scanApps() tea.Msg {
-	s := scanner.New(m.config.AppsConfig)
-	apps, err := s.Scan()
+	startTime := time.Now()
+	debugLog("Starting scan...")
 
-	for _, app := range apps {
-		// Use hash-based conflict detection for better accuracy
-		sync.UpdateSyncStatusWithHashes(app, m.config.DotfilesPath, m.stateManager)
+	s := scanner.New(m.config.AppsConfig)
+
+	debugLog("Scanner created, starting parallel scan...")
+	scanStart := time.Now()
+	apps, err := s.Scan()
+	debugLog("Scan completed in %v, found %d apps", time.Since(scanStart), len(apps))
+
+	if err != nil {
+		debugLog("Scan error: %v", err)
+		return scanCompleteMsg{apps: apps, err: err}
 	}
 
+	debugLog("Starting hash-based sync status update...")
+	hashStart := time.Now()
+	for i, app := range apps {
+		debugLog("  [%d/%d] Updating sync status for %s (%d files)...", i+1, len(apps), app.Name, len(app.Files))
+		sync.UpdateSyncStatusWithHashes(app, m.config.DotfilesPath, m.stateManager)
+	}
+	debugLog("Sync status update completed in %v", time.Since(hashStart))
+
+	debugLog("Total scan time: %v", time.Since(startTime))
 	return scanCompleteMsg{apps: apps, err: err}
 }
 
@@ -1497,30 +1521,71 @@ func (m *Model) renderMain() string {
 	switch m.screen {
 	case ScreenScanning:
 		// Nice loading screen with tips
-		var scanContent strings.Builder
-		scanContent.WriteString(m.spinner.View() + " Scanning for apps...\n\n")
-		scanContent.WriteString(ui.MutedStyle.Render("Looking for configurations in:\n"))
-		scanContent.WriteString(ui.MutedStyle.Render("  • ~/.config/\n"))
-		scanContent.WriteString(ui.MutedStyle.Render("  • ~/Library/Application Support/\n"))
-		scanContent.WriteString(ui.MutedStyle.Render("  • Home directory dotfiles\n\n"))
+		var lines []string
 
-		// Show helpful tips
+		// Title with spinner
+		lines = append(lines, m.spinner.View()+" Scanning for apps...")
+		lines = append(lines, "")
+
+		// Scanning locations
+		lines = append(lines, "Looking for configurations in:")
+		lines = append(lines, "  • ~/.config/")
+		lines = append(lines, "  • ~/Library/Application Support/")
+		lines = append(lines, "  • Home directory dotfiles")
+		lines = append(lines, "")
+
+		// Show helpful tips with rotating animation
 		tips := []string{
 			"💡 Use / to search apps by name",
 			"💡 Press 1-9 to filter by category",
 			"💡 Press M to select modified, O for outdated",
 			"💡 Press d to view file differences",
 			"💡 Press g to access git operations",
+			"💡 Press s to rescan at any time",
 		}
 		tipIndex := int(time.Now().Unix()/3) % len(tips)
-		scanContent.WriteString(ui.MutedStyle.Render(tips[tipIndex]))
+		lines = append(lines, tips[tipIndex])
 
-		content := lipgloss.NewStyle().
-			Width(m.width).
-			Height(m.height-6).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(scanContent.String())
-		b.WriteString(content)
+		// Join all lines
+		scanContent := strings.Join(lines, "\n")
+
+		// Create a styled box for scan content
+		scanBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ui.Primary).
+			Padding(1, 3).
+			Render(scanContent)
+
+		// Get box dimensions
+		boxHeight := lipgloss.Height(scanBox)
+		boxWidth := lipgloss.Width(scanBox)
+
+		// Calculate padding to center
+		availableHeight := m.height - 6 // header + status + help + newlines
+		availableWidth := m.width - 2   // AppStyle padding
+
+		topPad := (availableHeight - boxHeight) / 2
+		if topPad < 0 {
+			topPad = 0
+		}
+		leftPad := (availableWidth - boxWidth) / 2
+		if leftPad < 0 {
+			leftPad = 0
+		}
+
+		// Build centered content with explicit padding
+		var scanOutput strings.Builder
+		for i := 0; i < topPad; i++ {
+			scanOutput.WriteString("\n")
+		}
+		// Add left padding to each line of the box
+		for _, line := range strings.Split(scanBox, "\n") {
+			scanOutput.WriteString(strings.Repeat(" ", leftPad))
+			scanOutput.WriteString(line)
+			scanOutput.WriteString("\n")
+		}
+
+		b.WriteString(scanOutput.String())
 
 	case ScreenSyncing:
 		// Sync progress screen with progress bar
@@ -1644,6 +1709,21 @@ func (m *Model) renderStatusBar() string {
 }
 
 func (m *Model) renderHelpBar() string {
+	// Show different help bar based on current screen
+	switch m.screen {
+	case ScreenScanning:
+		items := []string{
+			ui.RenderHelpItem("q", "quit"),
+		}
+		return ui.HelpBarStyle.Render("⏳ Scanning... " + strings.Join(items, "  "))
+
+	case ScreenSyncing:
+		items := []string{
+			ui.RenderHelpItem("q", "quit"),
+		}
+		return ui.HelpBarStyle.Render("🔄 Syncing... " + strings.Join(items, "  "))
+	}
+
 	// Show different help bar when in search mode
 	if m.searchMode {
 		items := []string{
@@ -1698,7 +1778,7 @@ func (m *Model) renderHelpBar() string {
 		}
 	}
 
-	items = append(items, ui.RenderHelpItem("g", "git"), ui.RenderHelpItem("?", "help"))
+	items = append(items, ui.RenderHelpItem("s", "rescan"), ui.RenderHelpItem("g", "git"), ui.RenderHelpItem("?", "help"))
 
 	return ui.HelpBarStyle.Render(strings.Join(items, "  "))
 }
@@ -2424,9 +2504,9 @@ func (m *Model) handleUndo() (tea.Model, tea.Cmd) {
 }
 
 func main() {
-	// Check for version flag
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+	// Check for flags
+	for _, arg := range os.Args[1:] {
+		switch arg {
 		case "-v", "--version", "version":
 			fmt.Printf("dotsync %s (built %s)\n", version, buildTime)
 			return
@@ -2438,9 +2518,14 @@ func main() {
 			fmt.Println("Options:")
 			fmt.Println("  -v, --version    Show version")
 			fmt.Println("  -h, --help       Show this help")
+			fmt.Println("  -d, --debug      Enable debug mode (logs to stderr)")
 			fmt.Println()
 			fmt.Println("Run without arguments to start the TUI.")
 			return
+		case "-d", "--debug", "debug":
+			debugMode = true
+			scanner.DebugMode = true
+			fmt.Fprintln(os.Stderr, "[DEBUG] Debug mode enabled")
 		}
 	}
 

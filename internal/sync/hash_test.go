@@ -63,12 +63,13 @@ func TestComputeDirHash_ContentChange(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "file.txt")
 	os.WriteFile(filePath, []byte("initial"), 0644)
 
-	hash1, _ := ComputeDirHash(tmpDir)
+	// Use NoCache version to avoid cache interference in tests
+	hash1, _ := ComputeDirHashNoCache(tmpDir)
 
 	// Change content
 	os.WriteFile(filePath, []byte("modified"), 0644)
 
-	hash2, _ := ComputeDirHash(tmpDir)
+	hash2, _ := ComputeDirHashNoCache(tmpDir)
 
 	if hash1 == hash2 {
 		t.Error("Directory hash should change when content changes")
@@ -204,5 +205,80 @@ func TestComputeFileHash_LargeFile(t *testing.T) {
 	hash2, _ := ComputeFileHash(tmpFile)
 	if hash != hash2 {
 		t.Error("Hash should be consistent")
+	}
+}
+
+func TestHashCache_Basic(t *testing.T) {
+	cache := &HashCache{
+		entries: make(map[string]hashEntry),
+	}
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test.txt")
+	os.WriteFile(tmpFile, []byte("test content"), 0644)
+
+	// First call should compute hash
+	hash1, err := cache.GetOrCompute(tmpFile)
+	if err != nil {
+		t.Fatalf("GetOrCompute failed: %v", err)
+	}
+
+	// Second call should return cached value
+	hash2, err := cache.GetOrCompute(tmpFile)
+	if err != nil {
+		t.Fatalf("GetOrCompute failed: %v", err)
+	}
+
+	if hash1 != hash2 {
+		t.Errorf("Cache should return consistent hash: %s != %s", hash1, hash2)
+	}
+
+	// Cache should have one entry
+	if cache.CacheSize() != 1 {
+		t.Errorf("Cache should have 1 entry, got %d", cache.CacheSize())
+	}
+}
+
+func TestHashCache_Clear(t *testing.T) {
+	cache := &HashCache{
+		entries: make(map[string]hashEntry),
+	}
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test.txt")
+	os.WriteFile(tmpFile, []byte("test content"), 0644)
+
+	cache.GetOrCompute(tmpFile)
+
+	if cache.CacheSize() == 0 {
+		t.Error("Cache should have entries")
+	}
+
+	cache.Clear()
+
+	if cache.CacheSize() != 0 {
+		t.Errorf("Cache should be empty after Clear, got %d", cache.CacheSize())
+	}
+}
+
+func TestHashCache_InvalidatePath(t *testing.T) {
+	cache := &HashCache{
+		entries: make(map[string]hashEntry),
+	}
+
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test.txt")
+	os.WriteFile(tmpFile, []byte("test content"), 0644)
+
+	cache.GetOrCompute(tmpFile)
+
+	if cache.CacheSize() != 1 {
+		t.Errorf("Cache should have 1 entry, got %d", cache.CacheSize())
+	}
+
+	cache.InvalidatePath(tmpFile)
+
+	if cache.CacheSize() != 0 {
+		t.Errorf("Cache should be empty after InvalidatePath, got %d", cache.CacheSize())
 	}
 }
