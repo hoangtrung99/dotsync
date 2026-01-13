@@ -50,10 +50,12 @@ const (
 	ScreenSyncing // Sync progress screen
 	ScreenConfirm // Confirmation screen before pull
 	ScreenHelp
-	ScreenDiff   // Diff viewer screen
-	ScreenGit    // Git operations screen
-	ScreenMerge  // Merge conflict resolution screen
-	ScreenCommit // Commit message input screen
+	ScreenDiff     // Diff viewer screen
+	ScreenGit      // Git operations screen
+	ScreenMerge    // Merge conflict resolution screen
+	ScreenCommit   // Commit message input screen
+	ScreenPreview  // File preview screen
+	ScreenSettings // Settings screen
 )
 
 // Panel represents which panel is focused
@@ -71,6 +73,15 @@ const (
 	SetupWelcome SetupStep = iota
 	SetupPath
 	SetupConfirm
+)
+
+// SettingsField represents which field is being edited in settings
+type SettingsField int
+
+const (
+	SettingsDotfilesPath SettingsField = iota
+	SettingsBackupPath
+	SettingsFieldCount // Used to wrap around
 )
 
 // SyncAction represents the type of sync action
@@ -97,17 +108,18 @@ type Model struct {
 	stateManager *sync.StateManager
 
 	// UI Components
-	appList   *components.AppList
-	fileList  *components.FileList
-	diffView  *components.DiffView
-	mergeView *components.MergeView
-	gitPanel  *components.GitPanel
-	spinner   spinner.Model
-	progress  progress.Model
-	help      help.Model
-	keys      ui.KeyMap
-	textInput textinput.Model
-	textArea  textarea.Model // For multi-line commit messages
+	appList     *components.AppList
+	fileList    *components.FileList
+	diffView    *components.DiffView
+	mergeView   *components.MergeView
+	gitPanel    *components.GitPanel
+	filePreview *components.FilePreview
+	spinner     spinner.Model
+	progress    progress.Model
+	help        help.Model
+	keys        ui.KeyMap
+	textInput   textinput.Model
+	textArea    textarea.Model // For multi-line commit messages
 
 	// State
 	screen       Screen
@@ -125,6 +137,10 @@ type Model struct {
 
 	// Setup wizard
 	setupStep SetupStep
+
+	// Settings screen
+	settingsField   SettingsField
+	settingsEditing bool // Whether we're editing a field
 
 	// Confirmation dialog
 	confirmAction SyncAction
@@ -231,6 +247,7 @@ func New() *Model {
 		diffView:     components.NewDiffView(),
 		mergeView:    components.NewMergeView(),
 		gitPanel:     components.NewGitPanel(),
+		filePreview:  components.NewFilePreview(),
 		spinner:      s,
 		progress:     prog,
 		help:         help.New(),
@@ -437,6 +454,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKeyPress(msg)
 
+	case tea.MouseMsg:
+		// Forward mouse events to file preview when in preview screen
+		if m.screen == ScreenPreview {
+			var cmd tea.Cmd
+			m.filePreview, cmd = m.filePreview.Update(msg)
+			return m, cmd
+		}
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -574,11 +599,15 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleGitKeys(msg)
 	case ScreenCommit:
 		return m.handleCommitKeys(msg)
+	case ScreenPreview:
+		return m.handlePreviewKeys(msg)
 	case ScreenHelp:
 		if key.Matches(msg, m.keys.Escape, m.keys.Help, m.keys.Quit) {
 			m.screen = ScreenMain
 		}
 		return m, nil
+	case ScreenSettings:
+		return m.handleSettingsKeys(msg)
 	case ScreenScanning:
 		if key.Matches(msg, m.keys.Quit) {
 			return m, tea.Quit
@@ -684,10 +713,43 @@ func (m *Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Git):
 		return m.handleGit()
 
+	case key.Matches(msg, m.keys.Preview):
+		return m.handlePreview()
+
 	case key.Matches(msg, m.keys.Brewfile):
 		return m.handleBrewfile()
 
+	case msg.String() == "S": // Shift+S for Settings
+		return m.handleSettings()
+
+	case msg.String() == "l", msg.String() == "right":
+		// Expand directory or enter files panel
+		if m.focusedPanel == PanelFiles {
+			m.fileList.ToggleExpand()
+		} else {
+			m.togglePanel()
+			m.updateFileList()
+		}
+		return m, nil
+
+	case msg.String() == "h", msg.String() == "left":
+		// Collapse directory or go back to apps panel
+		if m.focusedPanel == PanelFiles {
+			// Try to collapse current directory, if not a directory go to apps panel
+			node := m.fileList.CurrentNode()
+			if node != nil && node.IsDir && node.Expanded {
+				m.fileList.ToggleExpand()
+			} else {
+				m.togglePanel()
+				m.updateFileList()
+			}
+		} else {
+			// Already in apps panel, do nothing
+		}
+		return m, nil
+
 	case msg.String() == "/":
+		// Enter search mode
 		// Enter search mode
 		m.searchMode = true
 		m.searchQuery = ""
@@ -925,6 +987,131 @@ func (m *Model) handleBrewfile() (tea.Model, tea.Cmd) {
 		formulae, casks, taps, path)
 
 	return m, nil
+}
+
+func (m *Model) handleSettings() (tea.Model, tea.Cmd) {
+	m.screen = ScreenSettings
+	m.settingsField = SettingsDotfilesPath
+	m.settingsEditing = false
+	m.status = "Settings - press Enter to edit, Esc to go back"
+	return m, nil
+}
+
+func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.settingsEditing {
+		// We're editing a field
+		switch msg.String() {
+		case "enter":
+			// Save the edited value
+			value := m.textInput.Value()
+			if value != "" {
+				// Expand ~ to home directory
+				if strings.HasPrefix(value, "~/") {
+					homeDir, _ := os.UserHomeDir()
+					value = filepath.Join(homeDir, value[2:])
+				}
+
+				switch m.settingsField {
+				case SettingsDotfilesPath:
+					m.config.DotfilesPath = value
+				case SettingsBackupPath:
+					m.config.BackupPath = value
+				}
+
+				// Save config
+				if err := m.config.Save(); err != nil {
+					m.status = fmt.Sprintf("Error saving config: %v", err)
+				} else {
+					m.status = "Settings saved!"
+				}
+			}
+			m.settingsEditing = false
+			m.textInput.Blur()
+			return m, nil
+
+		case "esc":
+			m.settingsEditing = false
+			m.textInput.Blur()
+			return m, nil
+
+		default:
+			var cmd tea.Cmd
+			m.textInput, cmd = m.textInput.Update(msg)
+			return m, cmd
+		}
+	}
+
+	// Not editing - navigation mode
+	switch msg.String() {
+	case "q", "esc":
+		m.screen = ScreenMain
+		m.status = "Ready"
+		return m, nil
+
+	case "j", "down":
+		m.settingsField = SettingsField((int(m.settingsField) + 1) % int(SettingsFieldCount))
+		return m, nil
+
+	case "k", "up":
+		m.settingsField = SettingsField((int(m.settingsField) - 1 + int(SettingsFieldCount)) % int(SettingsFieldCount))
+		return m, nil
+
+	case "enter", " ":
+		// Start editing the current field
+		m.settingsEditing = true
+		switch m.settingsField {
+		case SettingsDotfilesPath:
+			m.textInput.SetValue(m.config.DotfilesPath)
+			m.textInput.Placeholder = "Enter dotfiles path..."
+		case SettingsBackupPath:
+			m.textInput.SetValue(m.config.BackupPath)
+			m.textInput.Placeholder = "Enter backup path..."
+		}
+		m.textInput.Focus()
+		return m, textinput.Blink
+	}
+
+	return m, nil
+}
+
+func (m *Model) handlePreview() (tea.Model, tea.Cmd) {
+	// Only preview when in Files panel
+	if m.focusedPanel != PanelFiles {
+		m.status = "Switch to Files panel to preview (Tab)"
+		return m, nil
+	}
+
+	file := m.fileList.Current()
+	if file == nil {
+		m.status = "No file selected"
+		return m, nil
+	}
+
+	// Set size and load file for preview
+	m.filePreview.SetSize(m.width-4, m.height-4)
+	if err := m.filePreview.Load(file.Path); err != nil {
+		m.status = fmt.Sprintf("Cannot preview: %v", err)
+		return m, nil
+	}
+
+	m.screen = ScreenPreview
+	m.status = "File preview - j/k scroll, mouse wheel, q to close"
+	return m, nil
+}
+
+func (m *Model) handlePreviewKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Escape, m.keys.Quit):
+		m.screen = ScreenMain
+		m.status = "Ready"
+		return m, nil
+
+	default:
+		// Forward all other keys to viewport for scrolling
+		var cmd tea.Cmd
+		m.filePreview, cmd = m.filePreview.Update(msg)
+		return m, cmd
+	}
 }
 
 func (m *Model) handleDiffKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1261,6 +1448,10 @@ func (m *Model) View() string {
 		return m.renderGit()
 	case ScreenCommit:
 		return m.renderCommitDialog()
+	case ScreenPreview:
+		return m.renderPreview()
+	case ScreenSettings:
+		return m.renderSettings()
 	default:
 		return m.renderMain()
 	}
@@ -1770,6 +1961,7 @@ func (m *Model) renderHelpBar() string {
 		// Files panel - show file-specific actions
 		items = []string{
 			ui.RenderHelpItem("space", "select"),
+			ui.RenderHelpItem("v", "preview"),
 			ui.RenderHelpItem("d", "diff"),
 			ui.RenderHelpItem("tab", "→apps"),
 		}
@@ -1829,10 +2021,12 @@ func (m *Model) renderHelp() string {
 		{"p", "Push: Copy local → dotfiles repo"},
 		{"l", "Pull: Copy dotfiles → local"},
 		{"d", "View diff for selected file"},
+		{"v", "Preview file content"},
 		{"m", "Merge conflicts"},
 		{"s", "Rescan all apps"},
 		{"b", "Export Brewfile to dotfiles"},
 		{"r", "Refresh current view"},
+		{"S", "Open settings (edit paths)"},
 	}
 	for _, bind := range syncBindings {
 		b.WriteString(fmt.Sprintf("  %s  %s\n",
@@ -1975,6 +2169,29 @@ func (m *Model) renderMerge() string {
 	return ui.AppStyle.Render(b.String())
 }
 
+func (m *Model) renderPreview() string {
+	var b strings.Builder
+
+	header := m.renderHeader()
+	b.WriteString(header)
+	b.WriteString("\n")
+
+	// Render file preview
+	b.WriteString(m.filePreview.View())
+	b.WriteString("\n")
+
+	// Help bar
+	helpItems := []string{
+		ui.RenderHelpItem("j/k", "scroll"),
+		ui.RenderHelpItem("PgUp/Dn", "page"),
+		ui.RenderHelpItem("Home/End", "top/bottom"),
+		ui.RenderHelpItem("q/Esc", "close"),
+	}
+	b.WriteString(ui.HelpBarStyle.Render(strings.Join(helpItems, "  ")))
+
+	return ui.AppStyle.Render(b.String())
+}
+
 func (m *Model) renderGit() string {
 	var b strings.Builder
 
@@ -1986,6 +2203,90 @@ func (m *Model) renderGit() string {
 	b.WriteString(m.gitPanel.View())
 
 	return ui.AppStyle.Render(b.String())
+}
+
+func (m *Model) renderSettings() string {
+	width := 70
+	style := lipgloss.NewStyle().
+		Width(width).
+		Padding(1, 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ui.Primary)
+
+	var b strings.Builder
+
+	// Title
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ui.Primary).
+		Render("⚙️  Settings")
+
+	b.WriteString(title)
+	b.WriteString("\n\n")
+
+	// Settings fields
+	fields := []struct {
+		name  string
+		value string
+		field SettingsField
+	}{
+		{"Dotfiles Path", m.config.DotfilesPath, SettingsDotfilesPath},
+		{"Backup Path", m.config.BackupPath, SettingsBackupPath},
+	}
+
+	for _, f := range fields {
+		isSelected := m.settingsField == f.field
+
+		// Label
+		labelStyle := lipgloss.NewStyle().Width(15)
+		if isSelected {
+			labelStyle = labelStyle.Bold(true).Foreground(ui.Primary)
+		} else {
+			labelStyle = labelStyle.Foreground(lipgloss.Color("#6c7086"))
+		}
+		b.WriteString(labelStyle.Render(f.name + ":"))
+		b.WriteString(" ")
+
+		// Value or input
+		if isSelected && m.settingsEditing {
+			// Show text input
+			b.WriteString(m.textInput.View())
+		} else {
+			valueStyle := lipgloss.NewStyle()
+			if isSelected {
+				valueStyle = valueStyle.
+					Background(lipgloss.Color("#313244")).
+					Foreground(lipgloss.Color("#cdd6f4")).
+					Padding(0, 1)
+			} else {
+				valueStyle = valueStyle.Foreground(lipgloss.Color("#cdd6f4"))
+			}
+			b.WriteString(valueStyle.Render(f.value))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+
+	// Help text
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086"))
+	if m.settingsEditing {
+		b.WriteString(helpStyle.Render("Enter: save  •  Esc: cancel"))
+	} else {
+		b.WriteString(helpStyle.Render("↑/↓: navigate  •  Enter: edit  •  Esc/q: back"))
+	}
+
+	// Current config file path
+	b.WriteString("\n\n")
+	b.WriteString(helpStyle.Render("Config file: " + config.ConfigPath()))
+
+	box := style.Render(b.String())
+
+	return lipgloss.Place(
+		m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		box,
+	)
 }
 
 func (m *Model) handleGitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

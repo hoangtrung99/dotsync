@@ -266,10 +266,18 @@ func (s *Scanner) getBuiltinDefinitions() []models.AppDefinition {
 			Category: "ai",
 			Icon:     "🤖",
 			ConfigPaths: []string{
+				// Core settings
 				"~/.claude/settings.json",
 				"~/.claude.json",
+				"~/.claude/.mcp.json",
+				// Plugins config
 				"~/.claude/plugins/known_marketplaces.json",
 				"~/.claude/plugins/installed_plugins.json",
+				// Custom extensions (folders)
+				"~/.claude/commands",
+				"~/.claude/agents",
+				"~/.claude/skills",
+				"~/.claude/scripts",
 			},
 			EncryptedFiles: []string{"settings.json"},
 		},
@@ -10350,14 +10358,29 @@ func (s *Scanner) collectFiles(path string, encryptedFiles []string) ([]models.F
 		return files, nil
 	}
 
-	// Directory - walk and collect files (with limits)
-	basePath := path
+	// Directory - use parent as basePath so RelPath includes the folder name
+	basePath := filepath.Dir(path)
 	baseDepth := strings.Count(path, string(os.PathSeparator))
+	folderName := filepath.Base(path)
+
+	// Add the root directory as a file entry
+	dirFile, err := models.NewFile(path, basePath)
+	if err == nil {
+		dirFile.IsDir = true
+		dirFile.RelPath = folderName
+		files = append(files, *dirFile)
+	}
+
 	fileCount := 0
 
 	err = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // Skip errors
+		}
+
+		// Skip the root directory itself (already added)
+		if p == path {
+			return nil
 		}
 
 		// Check depth limit
@@ -10379,19 +10402,19 @@ func (s *Scanner) collectFiles(path string, encryptedFiles []string) ([]models.F
 			return nil
 		}
 
-		// Only add files, not directories
-		if !d.IsDir() {
-			// Check file limit
-			if fileCount >= maxFilesPerDir {
-				return filepath.SkipAll
-			}
+		// Check file limit
+		if fileCount >= maxFilesPerDir {
+			return filepath.SkipAll
+		}
 
-			file, err := models.NewFile(p, basePath)
-			if err == nil {
-				file.Encrypted = s.isEncrypted(file.Name, encryptedFiles)
-				files = append(files, *file)
-				fileCount++
-			}
+		// Add both files and directories - use parent of root as basePath
+		// so RelPath includes the root folder name
+		file, err := models.NewFile(p, basePath)
+		if err == nil {
+			file.IsDir = d.IsDir()
+			file.Encrypted = s.isEncrypted(file.Name, encryptedFiles)
+			files = append(files, *file)
+			fileCount++
 		}
 
 		return nil

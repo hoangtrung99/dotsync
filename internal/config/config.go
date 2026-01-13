@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/go-git/go-git/v5"
 )
 
 // Config holds the application configuration
@@ -76,8 +78,11 @@ func (c *Config) Save() error {
 	return os.WriteFile(configPath, data, 0644)
 }
 
-// EnsureDirectories creates necessary directories
+// EnsureDirectories creates necessary directories and initializes git repo if needed
 func (c *Config) EnsureDirectories() error {
+	// Check if dotfiles directory already exists
+	dotfilesExisted := c.DotfilesExists()
+
 	dirs := []string{
 		c.DotfilesPath,
 		c.BackupPath,
@@ -89,7 +94,20 @@ func (c *Config) EnsureDirectories() error {
 		}
 	}
 
+	// Initialize git repo if dotfiles directory was just created
+	if !dotfilesExisted && !c.IsGitRepo() {
+		if err := c.initGitRepo(); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+// initGitRepo initializes a git repository in the dotfiles directory
+func (c *Config) initGitRepo() error {
+	_, err := git.PlainInit(c.DotfilesPath, false)
+	return err
 }
 
 // GetDestPath returns the destination path in dotfiles for a given app

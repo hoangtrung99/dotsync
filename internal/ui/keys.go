@@ -36,6 +36,7 @@ type KeyMap struct {
 	UseDotfiles key.Binding // Use dotfiles version
 	Refresh     key.Binding // Refresh current view
 	Undo        key.Binding // Undo last selection change
+	Preview     key.Binding // Preview file content
 }
 
 // DefaultKeyMap returns the default keybindings
@@ -66,8 +67,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("PgDn", "page down"),
 		),
 		Home: key.NewBinding(
-			key.WithKeys("home", "g"),
-			key.WithHelp("Home/g", "first"),
+			key.WithKeys("home"),
+			key.WithHelp("Home", "first"),
 		),
 		End: key.NewBinding(
 			key.WithKeys("end", "G"),
@@ -168,6 +169,10 @@ func DefaultKeyMap() KeyMap {
 		Undo: key.NewBinding(
 			key.WithKeys("u"),
 			key.WithHelp("u", "undo"),
+		),
+		Preview: key.NewBinding(
+			key.WithKeys("v", "enter"),
+			key.WithHelp("v/↵", "preview"),
 		),
 	}
 }
