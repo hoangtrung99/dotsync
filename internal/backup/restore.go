@@ -277,7 +277,7 @@ func (b *BackupManager) getLocalConfigPath(appID, fileName string) string {
 	}
 
 	// Default to home directory for dotfiles
-	if fileName[0] == '.' {
+	if len(fileName) > 0 && fileName[0] == '.' {
 		return filepath.Join(homeDir, fileName)
 	}
 

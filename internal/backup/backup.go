@@ -155,7 +155,7 @@ func (b *BackupManager) ListMachineFiles(machineName string) ([]string, error) {
 
 		// Check if this is a file inside a machine folder
 		rel, _ := filepath.Rel(b.config.DotfilesPath, path)
-		parts := filepath.SplitList(rel)
+		parts := splitPath(rel)
 		if len(parts) >= 2 {
 			// Check if parent directory is the machine name
 			dir := filepath.Dir(rel)

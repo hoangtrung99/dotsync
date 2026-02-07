@@ -222,9 +222,8 @@ func (r *Resolver) UpdateSyncState(file FileInfo) error {
 	localHash, _ := sync.ComputeFileHash(file.FilePath)
 	remoteHash, _ := sync.ComputeFileHash(file.DotfilesPath)
 
-	// Update state manager
-	relPath := filepath.Base(file.FilePath)
-	r.detector.UpdateFileState(file.AppID, relPath, localHash, remoteHash)
+	// Update state manager using the same relPath key as detectFileState
+	r.detector.UpdateFileState(file.AppID, file.RelPath, localHash, remoteHash)
 
 	return nil
 }
@@ -318,9 +317,13 @@ func (r *Resolver) ResolveAuto(detection *DetectionResult) *ResolveAutoResult {
 		}
 
 		// Commit if there were successful pushes
+		// Use AddAll to stage everything (both backup and sync path files)
+		// so all changes are captured in a single commit
 		if len(successfulPushes) > 0 {
 			result.CommitMessage = GenerateCommitMessage(successfulPushes)
-			if err := r.CommitChanges(result.CommitMessage, successfulPushes); err != nil {
+			if err := r.gitRepo.AddAll(); err != nil {
+				result.Error = fmt.Errorf("add failed: %w", err)
+			} else if err := r.gitRepo.Commit(result.CommitMessage); err != nil {
 				result.Error = fmt.Errorf("commit failed: %w", err)
 			} else {
 				result.Committed = true

@@ -314,6 +314,12 @@ func New() *Model {
 		m.screen = ScreenSetup
 	}
 
+	// Initialize git panel with repo for header branch display
+	if cfg.IsGitRepo() {
+		repo := git.NewRepo(cfg.DotfilesPath)
+		m.gitPanel.SetRepo(repo)
+	}
+
 	return m
 }
 
@@ -551,7 +557,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						dotfilesHash := r.File.DotfilesHash
 
 						// After sync, both hashes should be the same
-						if msg.action == "push" {
+						if msg.action == "push" || msg.action == "push+commit" {
 							// After push, dotfiles now has the local content
 							dotfilesHash = localHash
 						} else {
@@ -576,6 +582,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.action == "pull" {
 				action = "Pulled"
 				nextHint = " • Configs restored successfully"
+			} else if msg.action == "push+commit" {
+				nextHint = " • Committed and pushed to remote"
 			}
 			m.status = fmt.Sprintf("✓ %s %d/%d files%s", action, success, len(msg.results), nextHint)
 		}
@@ -1445,11 +1453,8 @@ func (m *Model) handleMergeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Determine max options based on action type
-	maxOptions := 1 // Push has 2 options (0 and 1)
-	if m.confirmAction == ActionPull {
-		maxOptions = 2 // Pull has 3 options (0, 1, and 2)
-	}
+	// Both push and pull have 2 options (0 and 1)
+	maxOptions := 1
 
 	switch msg.String() {
 	case "up", "k":
@@ -1477,7 +1482,7 @@ func (m *Model) handleConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.status = "Push cancelled"
 			}
 		} else {
-			// Pull confirmation
+			// Pull confirmation (always backs up before pulling)
 			switch ConfirmOption(m.confirmCursor) {
 			case ConfirmProceed:
 				m.syncing = true
@@ -1487,15 +1492,7 @@ func (m *Model) handleConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.screen = ScreenSyncing
 				m.status = "Backing up and pulling..."
 				return m, m.pullApps
-			case ConfirmBackup:
-				m.syncing = true
-				m.syncAction = "pull"
-				m.syncTotal = len(m.fileDiffs)
-				m.syncCurrent = 0
-				m.screen = ScreenSyncing
-				m.status = "Pulling (no backup)..."
-				return m, m.pullApps
-			case ConfirmCancel:
+			case ConfirmBackup: // Used as Cancel for pull (index 1)
 				m.screen = ScreenMain
 				m.status = "Pull cancelled"
 			}
@@ -1840,9 +1837,8 @@ func (m *Model) renderConfirm() string {
 			label string
 			desc  string
 		}{
-			{"1", "Backup & Pull", "Save current configs to backup folder, then pull"},
-			{"2", "Pull Only", "Replace without backup (not recommended)"},
-			{"3", "Cancel", "Go back without changes"},
+			{"1", "Pull", "Backup current configs and pull from dotfiles"},
+			{"2", "Cancel", "Go back without changes"},
 		}
 	}
 
@@ -2002,13 +1998,10 @@ func (m *Model) renderHeader() string {
 	ver := ui.VersionStyle.Render("v" + version)
 	path := ui.MutedStyle.Render("  " + m.config.DotfilesPath)
 
-	// Show git branch if in a git repo
+	// Show git branch if in a git repo (cached from gitPanel)
 	gitInfo := ""
-	if m.config.IsGitRepo() {
-		repo := git.NewRepo(m.config.DotfilesPath)
-		if branch := repo.CurrentBranch(); branch != "" {
-			gitInfo = ui.MutedStyle.Render(" [" + branch + "]")
-		}
+	if m.config.IsGitRepo() && m.gitPanel != nil && m.gitPanel.Status != nil && m.gitPanel.Status.Branch != "" {
+		gitInfo = ui.MutedStyle.Render(" [" + m.gitPanel.Status.Branch + "]")
 	}
 
 	return ui.HeaderStyle.Render(title + "  " + ver + path + gitInfo)
@@ -3281,6 +3274,7 @@ func (m *Model) handlePushAndCommit() (tea.Model, tea.Cmd) {
 
 	m.status = "Pushing and committing..."
 	m.syncing = true
+	m.screen = ScreenSyncing
 
 	return m, func() tea.Msg {
 		// Export files first
@@ -3303,10 +3297,16 @@ func (m *Model) handlePushAndCommit() (tea.Model, tea.Cmd) {
 		// Commit and push
 		gitRepo := git.NewRepo(m.config.DotfilesPath)
 		if gitRepo.IsRepo() {
-			_ = gitRepo.AddAll()
-			_ = gitRepo.Commit(commitMsg)
+			if err := gitRepo.AddAll(); err != nil {
+				return syncCompleteMsg{results: results, err: fmt.Errorf("git add: %w", err), action: "push+commit"}
+			}
+			if err := gitRepo.Commit(commitMsg); err != nil {
+				return syncCompleteMsg{results: results, err: fmt.Errorf("git commit: %w", err), action: "push+commit"}
+			}
 			if gitRepo.HasRemote() {
-				_ = gitRepo.Push()
+				if err := gitRepo.Push(); err != nil {
+					return syncCompleteMsg{results: results, err: fmt.Errorf("git push: %w", err), action: "push+commit"}
+				}
 			}
 		}
 

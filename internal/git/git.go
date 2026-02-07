@@ -10,6 +10,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/storer"
 )
 
 // Repo represents a git repository
@@ -213,21 +214,26 @@ func (r *Repo) AddAll() error {
 		return fmt.Errorf("not a git repository")
 	}
 
-	worktree, err := r.repo.Worktree()
-	if err != nil {
-		return err
-	}
-
 	// Use git command for AddAll since go-git's Add with glob is limited
 	cmd := exec.Command("git", "-C", r.Path, "add", "-A")
 	if err := cmd.Run(); err != nil {
 		// Fallback: add each file individually
-		status, err := worktree.Status()
-		if err != nil {
-			return err
+		worktree, wtErr := r.repo.Worktree()
+		if wtErr != nil {
+			return wtErr
 		}
+		status, statusErr := worktree.Status()
+		if statusErr != nil {
+			return statusErr
+		}
+		var lastErr error
 		for path := range status {
-			_, _ = worktree.Add(path)
+			if _, addErr := worktree.Add(path); addErr != nil {
+				lastErr = addErr
+			}
+		}
+		if lastErr != nil {
+			return lastErr
 		}
 	}
 	return nil
@@ -262,7 +268,11 @@ func (r *Repo) CommitAmend(message string) error {
 
 	// go-git doesn't support amend directly, use exec
 	cmd := exec.Command("git", "-C", r.Path, "commit", "--amend", "-m", message)
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("commit amend failed: %s", string(output))
+	}
+	return nil
 }
 
 // Push pushes to the remote
@@ -282,6 +292,10 @@ func (r *Repo) Push() error {
 
 // PushWithUpstream pushes and sets upstream
 func (r *Repo) PushWithUpstream(remote, branch string) error {
+	if r.repo == nil {
+		return fmt.Errorf("not a git repository")
+	}
+
 	cmd := exec.Command("git", "-C", r.Path, "push", "-u", remote, branch)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -318,12 +332,20 @@ func (r *Repo) Fetch() error {
 
 // Stash stashes current changes
 func (r *Repo) Stash() error {
+	if r.repo == nil {
+		return fmt.Errorf("not a git repository")
+	}
+
 	cmd := exec.Command("git", "-C", r.Path, "stash")
 	return cmd.Run()
 }
 
 // StashPop pops the latest stash
 func (r *Repo) StashPop() error {
+	if r.repo == nil {
+		return fmt.Errorf("not a git repository")
+	}
+
 	cmd := exec.Command("git", "-C", r.Path, "stash", "pop")
 	return cmd.Run()
 }
@@ -398,7 +420,7 @@ func (r *Repo) Log(count int) ([]CommitInfo, error) {
 	i := 0
 	_ = commitIter.ForEach(func(c *object.Commit) error {
 		if i >= count {
-			return fmt.Errorf("done")
+			return storer.ErrStop
 		}
 		commits = append(commits, CommitInfo{
 			Hash:    c.Hash.String()[:7],

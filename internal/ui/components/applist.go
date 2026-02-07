@@ -288,17 +288,3 @@ func (l *AppList) wrapInPanel(content string) string {
 
 // MutedStyle for scroll indicators
 var MutedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

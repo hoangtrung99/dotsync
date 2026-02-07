@@ -1,8 +1,8 @@
 package quicksync
 
 import (
+	"fmt"
 	"os"
-	"path/filepath"
 
 	"dotsync/internal/config"
 	"dotsync/internal/modes"
@@ -78,6 +78,7 @@ func (s FileState) Icon() string {
 type FileInfo struct {
 	AppID        string
 	FilePath     string    // Local file path
+	RelPath      string    // Relative path (used as key in state manager)
 	DotfilesPath string    // Path in dotfiles repo (backup path)
 	SyncPath     string    // Path for shared copy (only when synced)
 	State        FileState // Current state
@@ -205,6 +206,7 @@ func (d *ConflictDetector) detectFileState(appID string, file models.File) FileI
 	info := FileInfo{
 		AppID:        appID,
 		FilePath:     file.Path,
+		RelPath:      file.RelPath,
 		DotfilesPath: dotfilesPath,
 		SyncPath:     syncPath,
 		Synced:       synced,
@@ -358,13 +360,13 @@ func (r *DetectionResult) Summary() string {
 
 	parts := []string{}
 	if r.LocalModified > 0 {
-		parts = append(parts, filepath.Join(string(rune('0'+r.LocalModified)), " local modified"))
+		parts = append(parts, fmt.Sprintf("%d local modified", r.LocalModified))
 	}
 	if r.RemoteUpdated > 0 {
-		parts = append(parts, filepath.Join(string(rune('0'+r.RemoteUpdated)), " remote updated"))
+		parts = append(parts, fmt.Sprintf("%d remote updated", r.RemoteUpdated))
 	}
 	if r.Conflicts > 0 {
-		parts = append(parts, filepath.Join(string(rune('0'+r.Conflicts)), " conflicts"))
+		parts = append(parts, fmt.Sprintf("%d conflicts", r.Conflicts))
 	}
 
 	result := ""
