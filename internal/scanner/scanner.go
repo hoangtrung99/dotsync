@@ -31,6 +31,7 @@ type Scanner struct {
 	homeDir    string
 	brewApps   map[string]bool // Apps installed via Homebrew
 	brewMu     sync.RWMutex    // Protects brewApps from concurrent access
+	brewWg     sync.WaitGroup  // Waits for brew loading to complete
 }
 
 // New creates a new Scanner
@@ -43,7 +44,11 @@ func New(configPath string) *Scanner {
 	}
 
 	// Load brew apps in background - don't block scanner creation
-	go s.loadBrewApps()
+	s.brewWg.Add(1)
+	go func() {
+		defer s.brewWg.Done()
+		s.loadBrewApps()
+	}()
 
 	return s
 }
@@ -87,6 +92,7 @@ func (s *Scanner) loadBrewApps() {
 
 // IsBrewInstalled checks if an app is installed via Homebrew
 func (s *Scanner) IsBrewInstalled(appName string) bool {
+	s.brewWg.Wait() // Ensure brew apps are loaded
 	s.brewMu.RLock()
 	defer s.brewMu.RUnlock()
 	return s.brewApps[strings.ToLower(appName)]

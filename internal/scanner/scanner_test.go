@@ -31,6 +31,7 @@ func TestNewWithConfigPath(t *testing.T) {
 
 func TestIsBrewInstalled(t *testing.T) {
 	s := New("")
+	s.brewWg.Wait() // Wait for background brew loading to finish
 
 	// Empty apps map should return false
 	s.brewApps = make(map[string]bool)
