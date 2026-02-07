@@ -224,8 +224,10 @@ func TestConfigStruct(t *testing.T) {
 }
 
 func TestSave(t *testing.T) {
-	// Create temp config directory to simulate save
+	// Override HOME so Save() writes to temp dir, not real config
 	tempDir := t.TempDir()
+	t.Setenv("HOME", tempDir)
+
 	configDir := filepath.Join(tempDir, ".config", "dotsync")
 	os.MkdirAll(configDir, 0755)
 
@@ -235,11 +237,19 @@ func TestSave(t *testing.T) {
 		AppsConfig:   "/test/apps.yaml",
 	}
 
-	// Save uses the real ConfigPath(), so we need to test it differently
-	// We can at least verify the method doesn't panic and handles errors
 	err := cfg.Save()
-	// Save might fail due to permissions or path issues in test, but should not panic
-	_ = err
+	if err != nil {
+		t.Errorf("Save should not error: %v", err)
+	}
+
+	// Verify file was written to temp dir
+	data, err := os.ReadFile(filepath.Join(configDir, "dotsync.json"))
+	if err != nil {
+		t.Fatalf("Failed to read saved config: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("Saved config should not be empty")
+	}
 }
 
 func TestLoadWithExistingConfig(t *testing.T) {
@@ -396,15 +406,25 @@ func TestLoad_ReturnsConfig(t *testing.T) {
 }
 
 func TestSave_CreatesDirectory(t *testing.T) {
-	// Test that Save creates the config directory if it doesn't exist
+	// Override HOME so Save() writes to temp dir, not real config
+	tempDir := t.TempDir()
+	t.Setenv("HOME", tempDir)
+
 	cfg := &Config{
 		DotfilesPath: "/tmp/test/dotfiles",
 		BackupPath:   "/tmp/test/backup",
 	}
-	// Save will attempt to create directory
+	// Save will create the config directory under temp HOME
 	err := cfg.Save()
-	// Result depends on permissions, but should not panic
-	_ = err
+	if err != nil {
+		t.Errorf("Save should not error: %v", err)
+	}
+
+	// Verify config was saved under temp HOME
+	configPath := filepath.Join(tempDir, ".config", "dotsync", "dotsync.json")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Error("Save should have created the config file")
+	}
 }
 
 func TestDefault_HasValidPaths(t *testing.T) {

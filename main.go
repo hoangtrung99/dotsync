@@ -29,6 +29,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -126,6 +127,7 @@ type Model struct {
 	spinner     spinner.Model
 	progress    progress.Model
 	help        help.Model
+	helpVP      viewport.Model
 	keys        ui.KeyMap
 	textInput   textinput.Model
 	textArea    textarea.Model // For multi-line commit messages
@@ -490,6 +492,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.updatePanelSizes()
+		if m.screen == ScreenHelp {
+			m.helpVP.Width = m.width - 4
+			m.helpVP.Height = m.height - 4
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -703,8 +709,12 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ScreenHelp:
 		if key.Matches(msg, m.keys.Escape, m.keys.Help, m.keys.Quit) {
 			m.screen = ScreenMain
+			return m, nil
 		}
-		return m, nil
+		// Forward to viewport for scrolling
+		var cmd tea.Cmd
+		m.helpVP, cmd = m.helpVP.Update(msg)
+		return m, cmd
 	case ScreenSettings:
 		return m.handleSettingsKeys(msg)
 	case ScreenScanning:
@@ -748,6 +758,8 @@ func (m *Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Help):
 		m.screen = ScreenHelp
+		m.helpVP = viewport.New(m.width-4, m.height-4)
+		m.helpVP.SetContent(m.renderHelp())
 		return m, nil
 
 	case key.Matches(msg, m.keys.Tab, m.keys.ShiftTab):
@@ -1949,7 +1961,7 @@ func (m *Model) renderMain() string {
 		b.WriteString(content)
 
 	case ScreenHelp:
-		b.WriteString(m.renderHelp())
+		b.WriteString(m.helpVP.View())
 
 	default:
 		panels := lipgloss.JoinHorizontal(
@@ -2057,6 +2069,16 @@ func (m *Model) renderHelpBar() string {
 			ui.RenderHelpItem("q", "quit"),
 		}
 		return ui.HelpBarStyle.Render("🔄 Syncing... " + strings.Join(items, "  "))
+
+	case ScreenHelp:
+		scrollPct := fmt.Sprintf("%d%%", int(m.helpVP.ScrollPercent()*100))
+		items := []string{
+			ui.RenderHelpItem("↑↓/j/k", "scroll"),
+			ui.RenderHelpItem("PgUp/PgDn", "page"),
+			ui.RenderHelpItem("esc/?", "close"),
+			ui.RenderHelpItem(scrollPct, ""),
+		}
+		return ui.HelpBarStyle.Render(strings.Join(items, "  "))
 	}
 
 	// Show different help bar when in search mode
