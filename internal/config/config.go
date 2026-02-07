@@ -96,7 +96,7 @@ func (c *Config) EnsureDirectories() error {
 
 	// Initialize git repo if dotfiles directory was just created
 	if !dotfilesExisted && !c.IsGitRepo() {
-		if err := c.initGitRepo(); err != nil {
+		if err := c.InitGitRepo(); err != nil {
 			return err
 		}
 	}
@@ -104,8 +104,8 @@ func (c *Config) EnsureDirectories() error {
 	return nil
 }
 
-// initGitRepo initializes a git repository in the dotfiles directory
-func (c *Config) initGitRepo() error {
+// InitGitRepo initializes a git repository in the dotfiles directory
+func (c *Config) InitGitRepo() error {
 	_, err := git.PlainInit(c.DotfilesPath, false)
 	return err
 }

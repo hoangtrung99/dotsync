@@ -818,7 +818,7 @@ func (m *Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Brewfile):
 		return m.handleBrewfile()
 
-	case msg.String() == "S": // Shift+S for Settings
+	case msg.String() == ",": // Comma for Settings (like Vim/tmux convention)
 		return m.handleSettings()
 
 	case msg.String() == "l", msg.String() == "right":
@@ -881,32 +881,28 @@ func (m *Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.clearCategoryFilter()
 
 	// New key bindings for backup mode features
-	case msg.String() == "q":
-		// Q: Quick Sync
+	case key.Matches(msg, m.keys.QuickSync): // Q (Shift+Q): Quick Sync
 		return m.handleQuickSync()
 
-	case msg.String() == "e":
-		// E: Open in Editor
+	case key.Matches(msg, m.keys.OpenEditor): // e: Open in Editor
 		return m.handleOpenEditor()
 
-	case msg.String() == "c":
-		// C: Check conflicts
+	case key.Matches(msg, m.keys.CheckConflict): // c: Check conflicts
 		return m.handleCheckConflicts()
 
-	case msg.String() == "m":
-		// M: Toggle mode (Sync <-> Backup)
+	case key.Matches(msg, m.keys.ToggleMode): // t: Toggle mode
 		return m.handleToggleMode()
 
-	case msg.String() == "B":
-		// Shift+B: Set all Backup
+	case key.Matches(msg, m.keys.SetAllSync): // S (Shift+S): Set all Sync
+		return m.handleSetAllSync()
+
+	case key.Matches(msg, m.keys.SetAllBackup): // B (Shift+B): Set all Backup
 		return m.handleSetAllBackup()
 
-	case msg.String() == "r":
-		// R: Open Restore dialog
+	case key.Matches(msg, m.keys.Restore): // R (Shift+R): Open Restore dialog
 		return m.handleRestore()
 
-	case msg.String() == "P":
-		// Shift+P: Push + Commit
+	case msg.String() == "P": // Shift+P: Push + Commit
 		return m.handlePushAndCommit()
 	}
 
@@ -1081,9 +1077,19 @@ func (m *Model) handleDiff() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleGit() (tea.Model, tea.Cmd) {
+	// Auto-create directory and init git if needed
+	if !m.config.DotfilesExists() {
+		if err := os.MkdirAll(m.config.DotfilesPath, 0755); err != nil {
+			m.status = fmt.Sprintf("Cannot create dotfiles dir: %v", err)
+			return m, nil
+		}
+	}
 	if !m.config.IsGitRepo() {
-		m.status = "Dotfiles is not a git repository"
-		return m, nil
+		if err := m.config.InitGitRepo(); err != nil {
+			m.status = fmt.Sprintf("Cannot init git: %v", err)
+			return m, nil
+		}
+		m.status = "Git repository initialized"
 	}
 
 	// Initialize git panel with repository
@@ -1092,7 +1098,9 @@ func (m *Model) handleGit() (tea.Model, tea.Cmd) {
 	m.gitPanel.Width = m.width - 4
 	m.gitPanel.Height = m.height - 6
 	m.screen = ScreenGit
-	m.status = "Git operations"
+	if m.status != "Git repository initialized" {
+		m.status = "Git operations"
+	}
 
 	return m, nil
 }
@@ -1150,7 +1158,14 @@ func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if err := m.config.Save(); err != nil {
 					m.status = fmt.Sprintf("Error saving config: %v", err)
 				} else {
-					m.status = "Settings saved!"
+					// Ensure directories exist and init git if needed
+					if err := m.config.EnsureDirectories(); err != nil {
+						m.status = fmt.Sprintf("Saved, but dir error: %v", err)
+					} else if m.settingsField == SettingsDotfilesPath {
+						m.status = fmt.Sprintf("Dotfiles path set to %s", value)
+					} else {
+						m.status = "Settings saved!"
+					}
 				}
 			}
 			m.settingsEditing = false
@@ -2250,11 +2265,12 @@ func (m *Model) renderHelp() string {
 	b.WriteString("\n")
 	b.WriteString(ui.MutedStyle.Render("  ─── 🔀 Git (press 'g') ───"))
 	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("  %s\n", ui.HelpDescStyle.Render("Tự động tạo git nếu chưa có")))
 	gitBindings := []struct {
 		key  string
 		desc string
 	}{
-		{"g", "Open git panel"},
+		{"g", "Open git panel (auto git init)"},
 		{"a", "Stage all"},
 		{"c", "Commit"},
 		{"p", "Push"},
@@ -2277,6 +2293,7 @@ func (m *Model) renderHelp() string {
 		key  string
 		desc string
 	}{
+		{",", "Settings (dotfiles path, backup path)"},
 		{"?", "Toggle this help"},
 		{"Esc", "Go back / Cancel"},
 		{"q", "Quit"},
