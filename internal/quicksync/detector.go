@@ -77,12 +77,13 @@ func (s FileState) Icon() string {
 // FileInfo contains file path and state information
 type FileInfo struct {
 	AppID        string
-	FilePath     string     // Local file path
-	DotfilesPath string     // Path in dotfiles repo
-	State        FileState  // Current state
-	Mode         modes.Mode // Sync or Backup mode
-	LocalHash    string     // Hash of local file
-	RemoteHash   string     // Hash of dotfiles file
+	FilePath     string    // Local file path
+	DotfilesPath string    // Path in dotfiles repo (backup path)
+	SyncPath     string    // Path for shared copy (only when synced)
+	State        FileState // Current state
+	Synced       bool      // Whether sync is enabled for this file
+	LocalHash    string    // Hash of local file
+	RemoteHash   string    // Hash of dotfiles file
 }
 
 // DetectionResult contains the result of state detection
@@ -172,10 +173,9 @@ func (d *ConflictDetector) DetectAll(apps []*models.App) *DetectionResult {
 				result.Conflicts++
 			}
 
-			// Group by mode
-			if fileInfo.Mode == modes.ModeBackup {
-				result.BackupFiles = append(result.BackupFiles, fileInfo)
-			} else {
+			// Group by mode: all files go to backup, synced files also in sync list
+			result.BackupFiles = append(result.BackupFiles, fileInfo)
+			if fileInfo.Synced {
 				result.SyncFiles = append(result.SyncFiles, fileInfo)
 			}
 		}
@@ -191,21 +191,23 @@ func (d *ConflictDetector) DetectApp(app *models.App) *DetectionResult {
 
 // detectFileState detects the state of a single file
 func (d *ConflictDetector) detectFileState(appID string, file models.File) FileInfo {
-	mode := d.modesConfig.GetMode(appID, file.Path)
+	synced := d.modesConfig.IsSynced(appID, file.Path)
 
-	// Get dotfiles path based on mode
-	var dotfilesPath string
-	if mode == modes.ModeBackup {
-		dotfilesPath = d.modesConfig.GetBackupPath(d.config.DotfilesPath, appID, file.Path)
-	} else {
-		dotfilesPath = d.modesConfig.GetSyncPath(d.config.DotfilesPath, appID, file.Path)
+	// Always use backup path as the primary dotfiles path
+	dotfilesPath := d.modesConfig.GetBackupPath(d.config.DotfilesPath, appID, file.Path)
+
+	// Sync path (shared copy) only when synced
+	var syncPath string
+	if synced {
+		syncPath = d.modesConfig.GetSyncPath(d.config.DotfilesPath, appID, file.Path)
 	}
 
 	info := FileInfo{
 		AppID:        appID,
 		FilePath:     file.Path,
 		DotfilesPath: dotfilesPath,
-		Mode:         mode,
+		SyncPath:     syncPath,
+		Synced:       synced,
 	}
 
 	// Check file existence

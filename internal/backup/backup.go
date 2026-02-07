@@ -34,7 +34,7 @@ type BackedUpFile struct {
 	Size     int64
 }
 
-// SkippedFile represents a file that was skipped (sync mode)
+// SkippedFile represents a file that was skipped
 type SkippedFile struct {
 	AppID    string
 	FilePath string
@@ -85,18 +85,7 @@ func (b *BackupManager) Backup(apps []*models.App) (*BackupResult, error) {
 				continue
 			}
 
-			mode := b.modesConfig.GetMode(app.ID, file.Path)
-
-			if mode == modes.ModeSync {
-				result.Skipped = append(result.Skipped, SkippedFile{
-					AppID:    app.ID,
-					FilePath: file.Path,
-					Reason:   "sync mode",
-				})
-				continue
-			}
-
-			// Backup mode - copy to machine folder
+			// Always backup - copy to machine folder
 			destPath := b.getBackupDestPath(app.ID, file.Name)
 			if err := b.copyFile(file.Path, destPath); err != nil {
 				result.Errors = append(result.Errors, BackupError{
@@ -128,11 +117,6 @@ func (b *BackupManager) Backup(apps []*models.App) (*BackupResult, error) {
 
 // BackupFile backs up a single file
 func (b *BackupManager) BackupFile(appID string, file models.File) error {
-	mode := b.modesConfig.GetMode(appID, file.Path)
-	if mode != modes.ModeBackup {
-		return fmt.Errorf("file is in sync mode, not backup mode")
-	}
-
 	destPath := b.getBackupDestPath(appID, file.Name)
 	if err := b.copyFile(file.Path, destPath); err != nil {
 		return err

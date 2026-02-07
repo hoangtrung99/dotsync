@@ -86,7 +86,7 @@ type FileState struct {
 	LocalModified  bool
 	RemoteModified bool
 	HasConflict    bool
-	Mode           modes.Mode
+	Synced         bool
 }
 
 // SyncState represents the overall sync state
@@ -174,7 +174,7 @@ func (a *Analyzer) conflictsSuggestion(files []string) *Suggestion {
 		Files:   files,
 		Count:   len(files),
 		Actions: []Action{
-			{Key: "Q", Label: "Quick sync", Description: "Resolve conflicts in editor"},
+			{Key: "Q", Label: "Quick backup", Description: "Resolve conflicts in editor"},
 			{Key: "E", Label: "Open editor", Description: "Open files in editor"},
 			{Key: "D", Label: "View diff", Description: "View differences"},
 		},
@@ -195,7 +195,7 @@ func (a *Analyzer) localModifiedSuggestion(files []string) *Suggestion {
 		Count:   len(files),
 		Actions: []Action{
 			{Key: "P", Label: "Push now", Description: "Push changes to dotfiles repo"},
-			{Key: "Q", Label: "Quick sync", Description: "Sync with remote"},
+			{Key: "Q", Label: "Quick backup", Description: "Sync with remote"},
 			{Key: "D", Label: "Details", Description: "View changed files"},
 		},
 	}
@@ -215,7 +215,7 @@ func (a *Analyzer) remoteUpdatedSuggestion(files []string) *Suggestion {
 		Count:   len(files),
 		Actions: []Action{
 			{Key: "L", Label: "Pull", Description: "Pull updates from remote"},
-			{Key: "Q", Label: "Quick sync", Description: "Sync with remote"},
+			{Key: "Q", Label: "Quick backup", Description: "Sync with remote"},
 			{Key: "D", Label: "Details", Description: "View updated files"},
 		},
 	}
@@ -259,7 +259,7 @@ func QuickAnalyze(localModified, remoteUpdated, conflicts int) *Suggestion {
 			Message: msg,
 			Count:   conflicts,
 			Actions: []Action{
-				{Key: "Q", Label: "Quick sync", Description: "Resolve conflicts in editor"},
+				{Key: "Q", Label: "Quick backup", Description: "Resolve conflicts in editor"},
 			},
 		}
 	}
@@ -275,7 +275,7 @@ func QuickAnalyze(localModified, remoteUpdated, conflicts int) *Suggestion {
 			Count:   localModified,
 			Actions: []Action{
 				{Key: "P", Label: "Push now", Description: "Push changes to dotfiles repo"},
-				{Key: "Q", Label: "Quick sync", Description: "Sync with remote"},
+				{Key: "Q", Label: "Quick backup", Description: "Sync with remote"},
 			},
 		}
 	}
@@ -291,7 +291,7 @@ func QuickAnalyze(localModified, remoteUpdated, conflicts int) *Suggestion {
 			Count:   remoteUpdated,
 			Actions: []Action{
 				{Key: "L", Label: "Pull", Description: "Pull updates from remote"},
-				{Key: "Q", Label: "Quick sync", Description: "Sync with remote"},
+				{Key: "Q", Label: "Quick backup", Description: "Sync with remote"},
 			},
 		}
 	}

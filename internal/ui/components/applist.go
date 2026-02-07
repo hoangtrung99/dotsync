@@ -239,13 +239,13 @@ func (l *AppList) renderItem(app *models.App, isCursor bool) string {
 
 	filesCount := fmt.Sprintf("(%d)", len(app.Files))
 
-	// Mode indicator [S] or [B]
-	modeIndicator := "[B]" // Default to backup
+	// Mode indicator [B] or [B+S]
+	modeIndicator := "[B]" // Default to backup only
 	modeStyle := ui.MutedStyle
 	if l.ModesConfig != nil {
-		mode := l.ModesConfig.GetAppMode(app.ID)
-		if mode.IsSync() {
-			modeIndicator = "[S]"
+		label := l.ModesConfig.AppSyncLabel(app.ID)
+		modeIndicator = "[" + label + "]"
+		if l.ModesConfig.IsAppSynced(app.ID) {
 			modeStyle = ui.SyncedStyle
 		}
 	}

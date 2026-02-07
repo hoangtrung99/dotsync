@@ -1,6 +1,7 @@
 package modes
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,71 +10,148 @@ import (
 func TestDefault(t *testing.T) {
 	cfg := Default()
 
-	if cfg.DefaultMode != ModeBackup {
-		t.Errorf("expected default mode to be backup, got %s", cfg.DefaultMode)
+	if cfg.Version != 2 {
+		t.Errorf("expected version 2, got %d", cfg.Version)
 	}
 
 	if cfg.MachineName == "" {
 		t.Error("expected machine name to be set from hostname")
 	}
 
-	if cfg.Apps == nil {
-		t.Error("expected apps map to be initialized")
+	if cfg.SyncedApps == nil {
+		t.Error("expected synced apps map to be initialized")
 	}
 
-	if cfg.Files == nil {
-		t.Error("expected files map to be initialized")
-	}
-}
-
-func TestModeToggle(t *testing.T) {
-	if ModeSync.Toggle() != ModeBackup {
-		t.Error("sync should toggle to backup")
-	}
-
-	if ModeBackup.Toggle() != ModeSync {
-		t.Error("backup should toggle to sync")
+	if cfg.SyncedFiles == nil {
+		t.Error("expected synced files map to be initialized")
 	}
 }
 
-func TestModeShort(t *testing.T) {
-	if ModeSync.Short() != "S" {
-		t.Errorf("expected S, got %s", ModeSync.Short())
+func TestIsSynced(t *testing.T) {
+	cfg := &ModesConfig{
+		Version:     2,
+		MachineName: "test",
+		SyncedApps:  map[string]bool{"zsh": true},
+		SyncedFiles: map[string]bool{"git/.gitignore": true},
 	}
 
-	if ModeBackup.Short() != "B" {
-		t.Errorf("expected B, got %s", ModeBackup.Short())
+	// App-level sync
+	if !cfg.IsSynced("zsh", ".zshrc") {
+		t.Error("zsh/.zshrc should be synced (app-level)")
+	}
+
+	// File-level sync
+	if !cfg.IsSynced("git", ".gitignore") {
+		t.Error("git/.gitignore should be synced (file-level)")
+	}
+
+	// Not synced
+	if cfg.IsSynced("tmux", ".tmux.conf") {
+		t.Error("tmux should not be synced")
+	}
+
+	// App not synced, but file override not present
+	if cfg.IsSynced("git", ".gitconfig") {
+		t.Error("git/.gitconfig should not be synced (no file override, app not synced)")
 	}
 }
 
-func TestModeIsSync(t *testing.T) {
-	if !ModeSync.IsSync() {
-		t.Error("ModeSync.IsSync() should be true")
+func TestIsAppSynced(t *testing.T) {
+	cfg := &ModesConfig{
+		Version:     2,
+		MachineName: "test",
+		SyncedApps:  map[string]bool{"zsh": true},
+		SyncedFiles: make(map[string]bool),
 	}
 
-	if ModeBackup.IsSync() {
-		t.Error("ModeBackup.IsSync() should be false")
+	if !cfg.IsAppSynced("zsh") {
+		t.Error("zsh should be synced")
+	}
+
+	if cfg.IsAppSynced("unknown") {
+		t.Error("unknown should not be synced")
 	}
 }
 
-func TestModeIsBackup(t *testing.T) {
-	if !ModeBackup.IsBackup() {
-		t.Error("ModeBackup.IsBackup() should be true")
+func TestToggleAppSync(t *testing.T) {
+	cfg := Default()
+
+	// Toggle on (default is off)
+	synced := cfg.ToggleAppSync("zsh")
+	if !synced {
+		t.Error("expected sync ON after first toggle")
+	}
+	if !cfg.SyncedApps["zsh"] {
+		t.Error("expected zsh in SyncedApps")
 	}
 
-	if ModeSync.IsBackup() {
-		t.Error("ModeSync.IsBackup() should be false")
+	// Toggle off
+	synced = cfg.ToggleAppSync("zsh")
+	if synced {
+		t.Error("expected sync OFF after second toggle")
+	}
+	if _, ok := cfg.SyncedApps["zsh"]; ok {
+		t.Error("expected zsh removed from SyncedApps")
+	}
+}
+
+func TestToggleFileSync(t *testing.T) {
+	cfg := Default()
+
+	synced := cfg.ToggleFileSync("zsh", ".zshrc")
+	if !synced {
+		t.Error("expected sync ON after toggle")
+	}
+	if !cfg.SyncedFiles["zsh/.zshrc"] {
+		t.Error("expected zsh/.zshrc in SyncedFiles")
+	}
+
+	synced = cfg.ToggleFileSync("zsh", ".zshrc")
+	if synced {
+		t.Error("expected sync OFF after second toggle")
+	}
+}
+
+func TestSyncLabel(t *testing.T) {
+	cfg := &ModesConfig{
+		Version:     2,
+		MachineName: "test",
+		SyncedApps:  map[string]bool{"zsh": true},
+		SyncedFiles: make(map[string]bool),
+	}
+
+	if cfg.SyncLabel("zsh", ".zshrc") != "B+S" {
+		t.Errorf("expected B+S, got %s", cfg.SyncLabel("zsh", ".zshrc"))
+	}
+
+	if cfg.SyncLabel("tmux", ".tmux.conf") != "B" {
+		t.Errorf("expected B, got %s", cfg.SyncLabel("tmux", ".tmux.conf"))
+	}
+}
+
+func TestAppSyncLabel(t *testing.T) {
+	cfg := &ModesConfig{
+		Version:     2,
+		MachineName: "test",
+		SyncedApps:  map[string]bool{"zsh": true},
+		SyncedFiles: make(map[string]bool),
+	}
+
+	if cfg.AppSyncLabel("zsh") != "B+S" {
+		t.Errorf("expected B+S, got %s", cfg.AppSyncLabel("zsh"))
+	}
+
+	if cfg.AppSyncLabel("tmux") != "B" {
+		t.Errorf("expected B, got %s", cfg.AppSyncLabel("tmux"))
 	}
 }
 
 func TestLoadSave(t *testing.T) {
-	// Create a temporary directory for testing
 	tmpDir := t.TempDir()
 	oldHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", oldHome)
 
-	// Create config directory
 	configDir := filepath.Join(tmpDir, ".config", "dotsync")
 	os.MkdirAll(configDir, 0755)
 
@@ -83,14 +161,14 @@ func TestLoadSave(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.DefaultMode != ModeBackup {
-		t.Errorf("expected default mode backup, got %s", cfg.DefaultMode)
+	if cfg.Version != 2 {
+		t.Errorf("expected version 2, got %d", cfg.Version)
 	}
 
 	// Modify and save
 	cfg.MachineName = "test-machine"
-	cfg.SetAppMode("zsh", ModeSync)
-	cfg.SetFileMode("zsh/.zshrc.local", ModeBackup)
+	cfg.SyncedApps["zsh"] = true
+	cfg.SyncedFiles["git/.gitignore"] = true
 
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("failed to save: %v", err)
@@ -106,39 +184,98 @@ func TestLoadSave(t *testing.T) {
 		t.Errorf("expected machine name test-machine, got %s", cfg2.MachineName)
 	}
 
-	if cfg2.Apps["zsh"] != ModeSync {
-		t.Errorf("expected zsh app mode sync, got %s", cfg2.Apps["zsh"])
+	if !cfg2.SyncedApps["zsh"] {
+		t.Error("expected zsh to be synced")
 	}
 
-	if cfg2.Files["zsh/.zshrc.local"] != ModeBackup {
-		t.Errorf("expected file mode backup, got %s", cfg2.Files["zsh/.zshrc.local"])
+	if !cfg2.SyncedFiles["git/.gitignore"] {
+		t.Error("expected git/.gitignore to be synced")
 	}
 }
 
-func TestSetAndRemoveModes(t *testing.T) {
-	cfg := Default()
+func TestMigrateV1(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
 
-	// Set app mode
-	cfg.SetAppMode("nvim", ModeSync)
-	if cfg.Apps["nvim"] != ModeSync {
-		t.Error("app mode not set correctly")
+	configDir := filepath.Join(tmpDir, ".config", "dotsync")
+	os.MkdirAll(configDir, 0755)
+
+	// Write v1 config
+	v1Data := map[string]interface{}{
+		"machine_name": "old-machine",
+		"default_mode": "backup",
+		"apps": map[string]string{
+			"zsh": "sync",
+			"git": "backup",
+		},
+		"files": map[string]string{
+			"git/.gitignore": "sync",
+			"zsh/.zshrc.local": "backup",
+		},
 	}
 
-	// Remove app mode
-	cfg.RemoveAppMode("nvim")
-	if _, ok := cfg.Apps["nvim"]; ok {
-		t.Error("app mode should be removed")
+	data, _ := json.MarshalIndent(v1Data, "", "  ")
+	configPath := filepath.Join(configDir, "modes.json")
+	os.WriteFile(configPath, data, 0644)
+
+	// Load should trigger migration
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("migration failed: %v", err)
 	}
 
-	// Set file mode
-	cfg.SetFileMode("zsh/.zshrc", ModeSync)
-	if cfg.Files["zsh/.zshrc"] != ModeSync {
-		t.Error("file mode not set correctly")
+	if cfg.Version != 2 {
+		t.Errorf("expected version 2 after migration, got %d", cfg.Version)
 	}
 
-	// Remove file mode
-	cfg.RemoveFileMode("zsh/.zshrc")
-	if _, ok := cfg.Files["zsh/.zshrc"]; ok {
-		t.Error("file mode should be removed")
+	if cfg.MachineName != "old-machine" {
+		t.Errorf("expected machine name old-machine, got %s", cfg.MachineName)
+	}
+
+	// zsh was "sync" → should be in SyncedApps
+	if !cfg.SyncedApps["zsh"] {
+		t.Error("expected zsh to be synced after migration")
+	}
+
+	// git was "backup" → should NOT be in SyncedApps
+	if cfg.SyncedApps["git"] {
+		t.Error("expected git to not be synced after migration")
+	}
+
+	// git/.gitignore was "sync" → should be in SyncedFiles
+	if !cfg.SyncedFiles["git/.gitignore"] {
+		t.Error("expected git/.gitignore to be synced after migration")
+	}
+
+	// zsh/.zshrc.local was "backup" → should NOT be in SyncedFiles
+	if cfg.SyncedFiles["zsh/.zshrc.local"] {
+		t.Error("expected zsh/.zshrc.local to not be synced after migration")
+	}
+}
+
+func TestStoragePaths(t *testing.T) {
+	cfg := &ModesConfig{
+		Version:     2,
+		MachineName: "my-machine",
+		SyncedApps:  make(map[string]bool),
+		SyncedFiles: make(map[string]bool),
+	}
+
+	basePath := "/home/user/dotfiles"
+
+	// Backup path
+	backupPath := cfg.GetBackupPath(basePath, "zsh", ".zshrc")
+	expected := "/home/user/dotfiles/zsh/my-machine/.zshrc"
+	if backupPath != expected {
+		t.Errorf("GetBackupPath = %s, want %s", backupPath, expected)
+	}
+
+	// Sync path
+	syncPath := cfg.GetSyncPath(basePath, "git", ".gitconfig")
+	expected = "/home/user/dotfiles/git/.gitconfig"
+	if syncPath != expected {
+		t.Errorf("GetSyncPath = %s, want %s", syncPath, expected)
 	}
 }

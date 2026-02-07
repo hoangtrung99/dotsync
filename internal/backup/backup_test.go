@@ -20,10 +20,10 @@ func setupTestEnv(t *testing.T) (string, *BackupManager, func()) {
 	}
 
 	modesCfg := &modes.ModesConfig{
+		Version:     2,
 		MachineName: "test-machine",
-		DefaultMode: modes.ModeBackup,
-		Apps:        make(map[string]modes.Mode),
-		Files:       make(map[string]modes.Mode),
+		SyncedApps:  make(map[string]bool),
+		SyncedFiles: make(map[string]bool),
 	}
 
 	os.MkdirAll(cfg.DotfilesPath, 0755)
@@ -101,12 +101,12 @@ func TestBackup(t *testing.T) {
 	}
 }
 
-func TestBackupSkipsSyncMode(t *testing.T) {
+func TestBackupAlwaysBackupsRegardlessOfSync(t *testing.T) {
 	tmpDir, bm, cleanup := setupTestEnv(t)
 	defer cleanup()
 
-	// Set zsh to sync mode
-	bm.modesConfig.SetAppMode("zsh", modes.ModeSync)
+	// Enable sync for zsh - but backup should still work
+	bm.modesConfig.SyncedApps["zsh"] = true
 
 	testFile := filepath.Join(tmpDir, ".zshrc")
 	os.WriteFile(testFile, []byte("# test"), 0644)
@@ -130,16 +130,13 @@ func TestBackupSkipsSyncMode(t *testing.T) {
 		t.Fatalf("backup failed: %v", err)
 	}
 
-	if len(result.BackedUp) != 0 {
-		t.Errorf("expected 0 backed up (sync mode), got %d", len(result.BackedUp))
+	// Should backup even though sync is enabled
+	if len(result.BackedUp) != 1 {
+		t.Errorf("expected 1 backed up (always backup), got %d", len(result.BackedUp))
 	}
 
-	if len(result.Skipped) != 1 {
-		t.Errorf("expected 1 skipped, got %d", len(result.Skipped))
-	}
-
-	if result.Skipped[0].Reason != "sync mode" {
-		t.Errorf("expected 'sync mode' reason, got '%s'", result.Skipped[0].Reason)
+	if len(result.Skipped) != 0 {
+		t.Errorf("expected 0 skipped, got %d", len(result.Skipped))
 	}
 }
 

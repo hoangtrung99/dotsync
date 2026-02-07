@@ -619,12 +619,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case quickSyncCompleteMsg:
 		m.syncing = false
 		if msg.result == nil {
-			m.status = "Quick sync failed"
+			m.status = "Quick backup failed"
 			return m, nil
 		}
 
 		if msg.result.Error != nil {
-			m.status = fmt.Sprintf("Quick sync error: %v", msg.result.Error)
+			m.status = fmt.Sprintf("Quick backup error: %v", msg.result.Error)
 			return m, nil
 		}
 
@@ -738,6 +738,13 @@ func (m *Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
+
+	case key.Matches(msg, m.keys.Escape):
+		// Esc: clear active filters (search or category)
+		if m.searchQuery != "" || m.categoryFilter != "" {
+			return m.clearAllFilters()
+		}
+		return m, nil
 
 	case key.Matches(msg, m.keys.Help):
 		m.screen = ScreenHelp
@@ -881,7 +888,7 @@ func (m *Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.clearCategoryFilter()
 
 	// New key bindings for backup mode features
-	case key.Matches(msg, m.keys.QuickSync): // Q (Shift+Q): Quick Sync
+	case key.Matches(msg, m.keys.QuickSync): // Q (Shift+Q): Quick Backup
 		return m.handleQuickSync()
 
 	case key.Matches(msg, m.keys.OpenEditor): // e: Open in Editor
@@ -892,12 +899,6 @@ func (m *Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.ToggleMode): // t: Toggle mode
 		return m.handleToggleMode()
-
-	case key.Matches(msg, m.keys.SetAllSync): // S (Shift+S): Set all Sync
-		return m.handleSetAllSync()
-
-	case key.Matches(msg, m.keys.SetAllBackup): // B (Shift+B): Set all Backup
-		return m.handleSetAllBackup()
 
 	case key.Matches(msg, m.keys.Restore): // R (Shift+R): Open Restore dialog
 		return m.handleRestore()
@@ -2071,7 +2072,7 @@ func (m *Model) renderHelpBar() string {
 	// Show filter hint if category filter is active
 	if m.categoryFilter != "" {
 		items := []string{
-			ui.RenderHelpItem("0", "clear"),
+			ui.RenderHelpItem("esc", "clear"),
 			ui.RenderHelpItem("space", "select"),
 			ui.RenderHelpItem("Q", "backup"),
 			ui.RenderHelpItem("p", "push"),
@@ -2079,6 +2080,19 @@ func (m *Model) renderHelpBar() string {
 			ui.RenderHelpItem("?", "help"),
 		}
 		return ui.HelpBarStyle.Render("📁 " + m.categoryFilter + "  " + strings.Join(items, "  "))
+	}
+
+	// Show search filter hint if search is active
+	if m.searchQuery != "" {
+		items := []string{
+			ui.RenderHelpItem("esc", "clear"),
+			ui.RenderHelpItem("space", "select"),
+			ui.RenderHelpItem("Q", "backup"),
+			ui.RenderHelpItem("p", "push"),
+			ui.RenderHelpItem("l", "pull"),
+			ui.RenderHelpItem("?", "help"),
+		}
+		return ui.HelpBarStyle.Render("🔍 \"" + m.searchQuery + "\"  " + strings.Join(items, "  "))
 	}
 
 	// Context-sensitive help based on panel and selection
@@ -2151,7 +2165,7 @@ func (m *Model) renderHelp() string {
 		key  string
 		desc string
 	}{
-		{"Q", "Quick Sync: auto-backup [B] files to dotfiles"},
+		{"Q", "Quick Backup: auto-backup files to dotfiles"},
 		{"P", "Push + Commit: push selected + git commit"},
 		{"p", "Push: copy local → dotfiles (manual)"},
 		{"l", "Pull: copy dotfiles → local"},
@@ -2167,14 +2181,14 @@ func (m *Model) renderHelp() string {
 
 	// Mode section - More detailed explanation
 	b.WriteString("\n")
-	b.WriteString(ui.MutedStyle.Render("  ─── 💾 Backup vs Sync Mode ───"))
+	b.WriteString(ui.MutedStyle.Render("  ─── 💾 Backup vs Sync ───"))
 	b.WriteString("\n")
 	b.WriteString(fmt.Sprintf("  %s  %s\n",
 		ui.HelpKeyStyle.Width(14).Render("[B] Backup"),
 		ui.HelpDescStyle.Render("Lưu riêng theo máy → Q tự động push"),
 	))
 	b.WriteString(fmt.Sprintf("  %s  %s\n",
-		ui.HelpKeyStyle.Width(14).Render("[S] Sync"),
+		ui.HelpKeyStyle.Width(14).Render("[B+S] Sync"),
 		ui.HelpDescStyle.Render("Giống nhau mọi máy → p/l thủ công"),
 	))
 	b.WriteString("\n")
@@ -2182,9 +2196,7 @@ func (m *Model) renderHelp() string {
 		key  string
 		desc string
 	}{
-		{"t", "Toggle mode cho app/file đang chọn"},
-		{"S", "Đặt tất cả thành Sync mode"},
-		{"B", "Đặt tất cả thành Backup mode"},
+		{"t", "Toggle sync cho app/file đang chọn"},
 		{"R", "Restore config từ máy khác"},
 	}
 	for _, bind := range modeBindings {
@@ -2847,11 +2859,17 @@ func (m *Model) filterByCategory(category string) (tea.Model, tea.Cmd) {
 // clearCategoryFilter clears the category filter
 func (m *Model) clearCategoryFilter() (tea.Model, tea.Cmd) {
 	m.categoryFilter = ""
+	m.searchQuery = ""
 	m.filteredApps = nil
 	m.appList.SetApps(m.apps)
 	m.updateFileList()
 	m.status = fmt.Sprintf("Showing all %d apps", len(m.apps))
 	return m, nil
+}
+
+// clearAllFilters clears both search and category filters
+func (m *Model) clearAllFilters() (tea.Model, tea.Cmd) {
+	return m.clearCategoryFilter()
 }
 
 // handleSelectModified selects all apps/files with modifications
@@ -3012,7 +3030,7 @@ func (m *Model) handleUndo() (tea.Model, tea.Cmd) {
 // handleQuickSync runs the Quick Sync workflow
 func (m *Model) handleQuickSync() (tea.Model, tea.Cmd) {
 	if m.quickSync == nil {
-		m.status = "Quick sync not initialized"
+		m.status = "Quick backup not initialized"
 		return m, nil
 	}
 
@@ -3022,7 +3040,7 @@ func (m *Model) handleQuickSync() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.status = "Running quick sync..."
+	m.status = "Running quick backup..."
 	m.syncing = true
 
 	return m, func() tea.Msg {
@@ -3044,24 +3062,28 @@ func (m *Model) handleToggleMode() (tea.Model, tea.Cmd) {
 	}
 
 	if m.focusedPanel == PanelApps {
-		// Toggle app mode
+		// Toggle app sync
 		currentApp := m.appList.Current()
 		if currentApp == nil {
 			m.status = "No app selected"
 			return m, nil
 		}
 
-		newMode := m.modesConfig.ToggleAppMode(currentApp.ID)
+		synced := m.modesConfig.ToggleAppSync(currentApp.ID)
 		if err := m.modesConfig.Save(); err != nil {
 			m.status = fmt.Sprintf("Failed to save mode: %v", err)
 			return m, nil
 		}
 
-		m.status = fmt.Sprintf("%s mode: %s", currentApp.Name, newMode.String())
+		if synced {
+			m.status = fmt.Sprintf("%s: sync enabled", currentApp.Name)
+		} else {
+			m.status = fmt.Sprintf("%s: sync disabled", currentApp.Name)
+		}
 		m.appList.SetModesConfig(m.modesConfig)
 		m.updateFileList()
 	} else {
-		// Toggle file mode
+		// Toggle file sync
 		currentApp := m.appList.Current()
 		currentFile := m.fileList.Current()
 		if currentApp == nil || currentFile == nil {
@@ -3069,78 +3091,20 @@ func (m *Model) handleToggleMode() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		newMode := m.modesConfig.ToggleFileMode(currentApp.ID, currentFile.Path)
+		synced := m.modesConfig.ToggleFileSync(currentApp.ID, currentFile.Path)
 		if err := m.modesConfig.Save(); err != nil {
 			m.status = fmt.Sprintf("Failed to save mode: %v", err)
 			return m, nil
 		}
 
-		m.status = fmt.Sprintf("%s mode: %s", currentFile.Name, newMode.String())
+		if synced {
+			m.status = fmt.Sprintf("%s: sync enabled", currentFile.Name)
+		} else {
+			m.status = fmt.Sprintf("%s: sync disabled", currentFile.Name)
+		}
 		m.fileList.SetModesConfig(m.modesConfig)
 	}
 
-	return m, nil
-}
-
-// handleSetAllSync sets all visible items to Sync mode
-func (m *Model) handleSetAllSync() (tea.Model, tea.Cmd) {
-	if m.modesConfig == nil {
-		m.status = "Modes not initialized"
-		return m, nil
-	}
-
-	// Get app IDs from visible apps
-	var appIDs []string
-	displayedApps := m.appList.VisibleApps()
-	for _, app := range displayedApps {
-		appIDs = append(appIDs, app.ID)
-	}
-
-	if len(appIDs) == 0 {
-		m.status = "No apps to update"
-		return m, nil
-	}
-
-	m.modesConfig.SetAllAppsMode(appIDs, modes.ModeSync)
-	if err := m.modesConfig.Save(); err != nil {
-		m.status = fmt.Sprintf("Failed to save: %v", err)
-		return m, nil
-	}
-
-	m.appList.SetModesConfig(m.modesConfig)
-	m.updateFileList()
-	m.status = fmt.Sprintf("Set %d apps to Sync mode", len(appIDs))
-	return m, nil
-}
-
-// handleSetAllBackup sets all visible items to Backup mode
-func (m *Model) handleSetAllBackup() (tea.Model, tea.Cmd) {
-	if m.modesConfig == nil {
-		m.status = "Modes not initialized"
-		return m, nil
-	}
-
-	// Get app IDs from visible apps
-	var appIDs []string
-	displayedApps := m.appList.VisibleApps()
-	for _, app := range displayedApps {
-		appIDs = append(appIDs, app.ID)
-	}
-
-	if len(appIDs) == 0 {
-		m.status = "No apps to update"
-		return m, nil
-	}
-
-	m.modesConfig.SetAllAppsMode(appIDs, modes.ModeBackup)
-	if err := m.modesConfig.Save(); err != nil {
-		m.status = fmt.Sprintf("Failed to save: %v", err)
-		return m, nil
-	}
-
-	m.appList.SetModesConfig(m.modesConfig)
-	m.updateFileList()
-	m.status = fmt.Sprintf("Set %d apps to Backup mode", len(appIDs))
 	return m, nil
 }
 
@@ -3174,7 +3138,7 @@ func (m *Model) handleRestore() (tea.Model, tea.Cmd) {
 // handleCheckConflicts runs conflict detection and displays results
 func (m *Model) handleCheckConflicts() (tea.Model, tea.Cmd) {
 	if m.quickSync == nil {
-		m.status = "Quick sync not initialized"
+		m.status = "Quick backup not initialized"
 		return m, nil
 	}
 

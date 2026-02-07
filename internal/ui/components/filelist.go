@@ -609,11 +609,11 @@ func (l *FileList) renderTreeNode(node *TreeNode, isCursor bool) string {
 	// Mode indicator for files
 	modeIndicator := ""
 	if node.File != nil && l.ModesConfig != nil {
-		mode := l.ModesConfig.GetMode(l.AppID, node.File.RelPath)
-		if mode.IsSync() {
-			modeIndicator = ui.SyncedStyle.Render("[S]")
+		label := l.ModesConfig.SyncLabel(l.AppID, node.File.RelPath)
+		if l.ModesConfig.IsSynced(l.AppID, node.File.RelPath) {
+			modeIndicator = ui.SyncedStyle.Render("[" + label + "]")
 		} else {
-			modeIndicator = ui.MutedStyle.Render("[B]")
+			modeIndicator = ui.MutedStyle.Render("[" + label + "]")
 		}
 	}
 
@@ -742,11 +742,11 @@ func (l *FileList) renderItem(file *models.File, isCursor bool) string {
 	// Mode indicator
 	modeIndicator := ""
 	if l.ModesConfig != nil {
-		mode := l.ModesConfig.GetMode(l.AppID, file.RelPath)
-		if mode.IsSync() {
-			modeIndicator = ui.SyncedStyle.Render("[S]")
+		label := l.ModesConfig.SyncLabel(l.AppID, file.RelPath)
+		if l.ModesConfig.IsSynced(l.AppID, file.RelPath) {
+			modeIndicator = ui.SyncedStyle.Render("[" + label + "]")
 		} else {
-			modeIndicator = ui.MutedStyle.Render("[B]")
+			modeIndicator = ui.MutedStyle.Render("[" + label + "]")
 		}
 	}
 

@@ -39,10 +39,8 @@ type KeyMap struct {
 	Preview     key.Binding // Preview file content
 
 	// Quick Sync & Mode keys
-	QuickSync     key.Binding // Quick sync (fetch, detect, auto-resolve or open IDE)
-	ToggleMode    key.Binding // Toggle mode (Sync <-> Backup)
-	SetAllSync    key.Binding // Set all items to Sync mode
-	SetAllBackup  key.Binding // Set all items to Backup mode
+	QuickSync     key.Binding // Quick backup (backup all + commit)
+	ToggleMode    key.Binding // Toggle sync ON/OFF
 	Restore       key.Binding // Open restore dialog
 	OpenEditor    key.Binding // Open current file in editor
 	CheckConflict key.Binding // Check for conflicts
@@ -187,19 +185,11 @@ func DefaultKeyMap() KeyMap {
 		// Quick Sync & Mode keys
 		QuickSync: key.NewBinding(
 			key.WithKeys("Q"),
-			key.WithHelp("Q", "quick sync"),
+			key.WithHelp("Q", "quick backup"),
 		),
 		ToggleMode: key.NewBinding(
 			key.WithKeys("t"),
-			key.WithHelp("t", "toggle mode"),
-		),
-		SetAllSync: key.NewBinding(
-			key.WithKeys("S"),
-			key.WithHelp("S", "set all sync"),
-		),
-		SetAllBackup: key.NewBinding(
-			key.WithKeys("B"),
-			key.WithHelp("B", "set all backup"),
+			key.WithHelp("t", "toggle sync"),
 		),
 		Restore: key.NewBinding(
 			key.WithKeys("R"),
@@ -231,7 +221,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		// Quick Selection
 		{k.SelectMod, k.SelectOut, k.Refresh, k.Undo},
 		// Quick Sync & Mode
-		{k.QuickSync, k.ToggleMode, k.SetAllSync, k.SetAllBackup},
+		{k.QuickSync, k.ToggleMode},
 		// Sync Operations
 		{k.Push, k.Pull, k.Scan, k.Brewfile, k.Restore},
 		// Diff & Merge

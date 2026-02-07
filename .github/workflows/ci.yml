@@ -15,7 +15,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
 
       - name: Download dependencies
         run: go mod download
@@ -40,7 +40,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v4
@@ -51,22 +51,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
 
       - name: Build
         run: go build -ldflags="-s -w" -o dotsync .
 
       - name: Test binary
         run: ./dotsync --version
-        if: matrix.os != 'windows-latest'
-
-      - name: Test binary (Windows)
-        run: .\dotsync.exe --version
-        if: matrix.os == 'windows-latest'

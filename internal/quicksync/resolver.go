@@ -71,43 +71,30 @@ func NewResolver(cfg *config.Config, modesCfg *modes.ModesConfig, gitRepo *git.R
 	}
 }
 
-// DetermineAction determines what action to take for a file based on its state and mode
+// DetermineAction determines what action to take for a file based on its state
+// In the new model, all files are always backed up. Synced files also get pushed to shared path.
 func (r *Resolver) DetermineAction(file FileInfo) ResolveAction {
-	// BACKUP mode: always auto-push local changes
-	if file.Mode == modes.ModeBackup {
-		switch file.State {
-		case StateLocalModified, StateLocalNew:
-			return ActionPush
-		case StateSynced:
-			return ActionNone
-		default:
-			// For backup mode, always prefer local (push)
-			return ActionPush
-		}
-	}
-
-	// SYNC mode: only report, don't auto-resolve
-	// User must manually choose P (push) or L (pull)
 	switch file.State {
+	case StateLocalModified, StateLocalNew:
+		return ActionPush
 	case StateSynced:
 		return ActionNone
 	case StateConflict:
-		return ActionMerge
+		if file.Synced {
+			return ActionMerge
+		}
+		// For backup-only files, always prefer local (push)
+		return ActionPush
 	default:
-		// Report status but don't auto-resolve
-		return ActionSkip
+		return ActionPush
 	}
 }
 
-// ResolveBackupFiles resolves all backup mode files (auto-push)
+// ResolveBackupFiles resolves all files (auto-push to backup path)
 func (r *Resolver) ResolveBackupFiles(files []FileInfo) []ResolveResult {
 	var results []ResolveResult
 
 	for _, file := range files {
-		if file.Mode != modes.ModeBackup {
-			continue
-		}
-
 		action := r.DetermineAction(file)
 		result := ResolveResult{
 			File:   file,
@@ -115,8 +102,18 @@ func (r *Resolver) ResolveBackupFiles(files []FileInfo) []ResolveResult {
 		}
 
 		if action == ActionPush {
+			// Always push to backup path
 			err := r.pushFile(file)
 			result.Error = err
+
+			// If synced, also push to shared path
+			if err == nil && file.Synced && file.SyncPath != "" {
+				syncFile := file
+				syncFile.DotfilesPath = file.SyncPath
+				if syncErr := r.pushFile(syncFile); syncErr != nil {
+					result.Error = syncErr
+				}
+			}
 		}
 
 		results = append(results, result)
