@@ -109,7 +109,7 @@ func TestKeyMap_ShortHelp(t *testing.T) {
 	}
 
 	// Should include common actions
-	expectedCount := 6 // Space, Tab, Push, Pull, Scan, Quit
+	expectedCount := 7 // Space, Tab, Push, Pull, Scan, Quit, and one more for new features
 	if len(help) != expectedCount {
 		t.Errorf("ShortHelp should have %d bindings, got %d", expectedCount, len(help))
 	}

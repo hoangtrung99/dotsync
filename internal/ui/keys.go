@@ -37,6 +37,15 @@ type KeyMap struct {
 	Refresh     key.Binding // Refresh current view
 	Undo        key.Binding // Undo last selection change
 	Preview     key.Binding // Preview file content
+
+	// Quick Sync & Mode keys
+	QuickSync     key.Binding // Quick sync (fetch, detect, auto-resolve or open IDE)
+	ToggleMode    key.Binding // Toggle mode (Sync <-> Backup)
+	SetAllSync    key.Binding // Set all items to Sync mode
+	SetAllBackup  key.Binding // Set all items to Backup mode
+	Restore       key.Binding // Open restore dialog
+	OpenEditor    key.Binding // Open current file in editor
+	CheckConflict key.Binding // Check for conflicts
 }
 
 // DefaultKeyMap returns the default keybindings
@@ -172,14 +181,44 @@ func DefaultKeyMap() KeyMap {
 		),
 		Preview: key.NewBinding(
 			key.WithKeys("v", "enter"),
-			key.WithHelp("v/↵", "preview"),
+			key.WithHelp("v/enter", "preview"),
+		),
+
+		// Quick Sync & Mode keys
+		QuickSync: key.NewBinding(
+			key.WithKeys("Q"),
+			key.WithHelp("Q", "quick sync"),
+		),
+		ToggleMode: key.NewBinding(
+			key.WithKeys("t"),
+			key.WithHelp("t", "toggle mode"),
+		),
+		SetAllSync: key.NewBinding(
+			key.WithKeys("S"),
+			key.WithHelp("S", "set all sync"),
+		),
+		SetAllBackup: key.NewBinding(
+			key.WithKeys("B"),
+			key.WithHelp("B", "set all backup"),
+		),
+		Restore: key.NewBinding(
+			key.WithKeys("R"),
+			key.WithHelp("R", "restore from..."),
+		),
+		OpenEditor: key.NewBinding(
+			key.WithKeys("e"),
+			key.WithHelp("e", "open in editor"),
+		),
+		CheckConflict: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "check conflicts"),
 		),
 	}
 }
 
 // ShortHelp returns keybindings to show in short help
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Space, k.Tab, k.Push, k.Pull, k.Help, k.Quit}
+	return []key.Binding{k.Space, k.Tab, k.QuickSync, k.Push, k.Pull, k.Help, k.Quit}
 }
 
 // FullHelp returns all keybindings for full help
@@ -191,10 +230,12 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Tab, k.Space, k.Enter, k.SelectAll, k.DeselectAll},
 		// Quick Selection
 		{k.SelectMod, k.SelectOut, k.Refresh, k.Undo},
+		// Quick Sync & Mode
+		{k.QuickSync, k.ToggleMode, k.SetAllSync, k.SetAllBackup},
 		// Sync Operations
-		{k.Push, k.Pull, k.Scan, k.Brewfile},
+		{k.Push, k.Pull, k.Scan, k.Brewfile, k.Restore},
 		// Diff & Merge
-		{k.Diff, k.Merge, k.NextHunk, k.PrevHunk, k.KeepLocal, k.UseDotfiles},
+		{k.Diff, k.Merge, k.OpenEditor, k.CheckConflict},
 		// Git & General
 		{k.Git, k.Help, k.Escape, k.Quit},
 	}

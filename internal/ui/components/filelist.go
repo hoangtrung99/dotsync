@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"dotsync/internal/modes"
 	"dotsync/internal/models"
 	"dotsync/internal/ui"
 )
@@ -25,13 +26,15 @@ type TreeNode struct {
 
 // FileList is a list component for files with tree view
 type FileList struct {
-	Files   []models.File
-	Cursor  int
-	Width   int
-	Height  int
-	Focused bool
-	Title   string
-	AppName string
+	Files       []models.File
+	Cursor      int
+	Width       int
+	Height      int
+	Focused     bool
+	Title       string
+	AppName     string
+	AppID       string
+	ModesConfig *modes.ModesConfig
 
 	// Tree structure
 	root         *TreeNode
@@ -40,13 +43,15 @@ type FileList struct {
 
 // NewFileList creates a new file list
 func NewFileList() *FileList {
+	modesCfg, _ := modes.Load()
 	return &FileList{
-		Files:   []models.File{},
-		Cursor:  0,
-		Width:   40,
-		Height:  15,
-		Focused: false,
-		Title:   "📄 Files",
+		Files:       []models.File{},
+		Cursor:      0,
+		Width:       40,
+		Height:      15,
+		Focused:     false,
+		Title:       "Files",
+		ModesConfig: modesCfg,
 	}
 }
 
@@ -56,6 +61,20 @@ func (l *FileList) SetFiles(files []models.File, appName string) {
 	l.AppName = appName
 	l.Cursor = 0
 	l.buildTree()
+}
+
+// SetFilesWithAppID updates the files list with app ID for mode lookup
+func (l *FileList) SetFilesWithAppID(files []models.File, appName, appID string) {
+	l.Files = files
+	l.AppName = appName
+	l.AppID = appID
+	l.Cursor = 0
+	l.buildTree()
+}
+
+// SetModesConfig sets the modes configuration
+func (l *FileList) SetModesConfig(cfg *modes.ModesConfig) {
+	l.ModesConfig = cfg
 }
 
 // Clear clears the file list
@@ -587,6 +606,17 @@ func (l *FileList) renderTreeNode(node *TreeNode, isCursor bool) string {
 	statusIcon := ""
 	var statusStyle = ui.SyncedStyle
 
+	// Mode indicator for files
+	modeIndicator := ""
+	if node.File != nil && l.ModesConfig != nil {
+		mode := l.ModesConfig.GetMode(l.AppID, node.File.RelPath)
+		if mode.IsSync() {
+			modeIndicator = ui.SyncedStyle.Render("[S]")
+		} else {
+			modeIndicator = ui.MutedStyle.Render("[B]")
+		}
+	}
+
 	if node.File != nil {
 		// Add encrypted indicator
 		if node.File.Encrypted {
@@ -623,20 +653,22 @@ func (l *FileList) renderTreeNode(node *TreeNode, isCursor bool) string {
 	var content string
 	if node.Depth == 0 {
 		// Top level - no connector
-		content = fmt.Sprintf("%s%s %s%s",
+		content = fmt.Sprintf("%s%s %s%s %s",
 			checkbox,
 			icon,
 			ui.FileNameStyle.Render(name),
 			suffix,
+			modeIndicator,
 		)
 	} else {
-		content = fmt.Sprintf("%s%s %s%s %s%s",
+		content = fmt.Sprintf("%s%s %s%s %s%s %s",
 			indent,
 			MutedStyle.Render(connector),
 			checkbox,
 			icon,
 			ui.FileNameStyle.Render(name),
 			suffix,
+			modeIndicator,
 		)
 	}
 
@@ -697,14 +729,25 @@ func (l *FileList) renderItem(file *models.File, isCursor bool) string {
 	if name == "" {
 		name = file.Name
 	}
-	maxNameLen := l.Width - 15
+	maxNameLen := l.Width - 20 // Extra space for mode indicator
 	if len(name) > maxNameLen {
 		name = "..." + name[len(name)-maxNameLen+3:]
 	}
 
 	suffix := ""
 	if file.Encrypted {
-		suffix = " " + ui.EncryptedStyle.Render("🔒")
+		suffix = " " + ui.EncryptedStyle.Render("lock")
+	}
+
+	// Mode indicator
+	modeIndicator := ""
+	if l.ModesConfig != nil {
+		mode := l.ModesConfig.GetMode(l.AppID, file.RelPath)
+		if mode.IsSync() {
+			modeIndicator = ui.SyncedStyle.Render("[S]")
+		} else {
+			modeIndicator = ui.MutedStyle.Render("[B]")
+		}
 	}
 
 	statusIcon := file.ConflictType.ConflictIcon()
@@ -732,11 +775,12 @@ func (l *FileList) renderItem(file *models.File, isCursor bool) string {
 		}
 	}
 
-	content := fmt.Sprintf("%s %s %s%s %s",
+	content := fmt.Sprintf("%s %s %s%s %s %s",
 		checkbox,
 		icon,
 		ui.FileNameStyle.Render(name),
 		suffix,
+		modeIndicator,
 		statusStyle.Render(statusIcon),
 	)
 

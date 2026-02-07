@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"dotsync/internal/modes"
 	"dotsync/internal/models"
 	"dotsync/internal/ui"
 
@@ -12,23 +13,26 @@ import (
 
 // AppList is a list component for apps
 type AppList struct {
-	Apps    []*models.App
-	Cursor  int
-	Width   int
-	Height  int
-	Focused bool
-	Title   string
+	Apps        []*models.App
+	Cursor      int
+	Width       int
+	Height      int
+	Focused     bool
+	Title       string
+	ModesConfig *modes.ModesConfig
 }
 
 // NewAppList creates a new app list
 func NewAppList(apps []*models.App) *AppList {
+	modesCfg, _ := modes.Load()
 	return &AppList{
-		Apps:    apps,
-		Cursor:  0,
-		Width:   30,
-		Height:  15,
-		Focused: true,
-		Title:   "📁 Applications",
+		Apps:        apps,
+		Cursor:      0,
+		Width:       30,
+		Height:      15,
+		Focused:     true,
+		Title:       "Applications",
+		ModesConfig: modesCfg,
 	}
 }
 
@@ -37,6 +41,19 @@ func (l *AppList) SetApps(apps []*models.App) {
 	l.Apps = apps
 	if l.Cursor >= len(apps) {
 		l.Cursor = max(0, len(apps)-1)
+	}
+}
+
+// SetModesConfig sets the modes configuration
+func (l *AppList) SetModesConfig(cfg *modes.ModesConfig) {
+	l.ModesConfig = cfg
+}
+
+// ReloadModesConfig reloads modes config from disk
+func (l *AppList) ReloadModesConfig() {
+	cfg, err := modes.Load()
+	if err == nil {
+		l.ModesConfig = cfg
 	}
 }
 
@@ -130,6 +147,11 @@ func (l *AppList) SelectedApps() []*models.App {
 	return selected
 }
 
+// VisibleApps returns all apps currently visible in the list
+func (l *AppList) VisibleApps() []*models.App {
+	return l.Apps
+}
+
 // View renders the app list
 func (l *AppList) View() string {
 	var b strings.Builder
@@ -203,11 +225,11 @@ func (l *AppList) renderItem(app *models.App, isCursor bool) string {
 	checkbox := ui.RenderCheckbox(app.Selected)
 	icon := app.Icon
 	if icon == "" {
-		icon = "📦"
+		icon = "pkg"
 	}
 
 	name := app.Name
-	maxNameLen := l.Width - 18
+	maxNameLen := l.Width - 22 // Extra space for mode indicator
 	if maxNameLen < 10 {
 		maxNameLen = 10
 	}
@@ -216,6 +238,17 @@ func (l *AppList) renderItem(app *models.App, isCursor bool) string {
 	}
 
 	filesCount := fmt.Sprintf("(%d)", len(app.Files))
+
+	// Mode indicator [S] or [B]
+	modeIndicator := "[B]" // Default to backup
+	modeStyle := ui.MutedStyle
+	if l.ModesConfig != nil {
+		mode := l.ModesConfig.GetAppMode(app.ID)
+		if mode.IsSync() {
+			modeIndicator = "[S]"
+			modeStyle = ui.SyncedStyle
+		}
+	}
 
 	// Count modified/conflict files for status indicator
 	var statusIndicator string
@@ -231,12 +264,12 @@ func (l *AppList) renderItem(app *models.App, isCursor bool) string {
 	}
 
 	if conflictCount > 0 {
-		statusIndicator = ui.ConflictStyle.Render("⚡")
+		statusIndicator = ui.ConflictStyle.Render("!!")
 	} else if modifiedCount > 0 {
-		statusIndicator = ui.ModifiedStyle.Render("●")
+		statusIndicator = ui.ModifiedStyle.Render("*")
 	}
 
-	content := fmt.Sprintf("%s %s %s %s %s", checkbox, icon, name, ui.MutedStyle.Render(filesCount), statusIndicator)
+	content := fmt.Sprintf("%s %s %s %s %s %s", checkbox, icon, name, ui.MutedStyle.Render(filesCount), modeStyle.Render(modeIndicator), statusIndicator)
 
 	if isCursor && l.Focused {
 		return ui.SelectedItemStyle.Width(l.Width - 4).Render(content)

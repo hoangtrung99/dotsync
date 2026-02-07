@@ -16,6 +16,13 @@ import (
 	"dotsync/internal/ui"
 	"dotsync/internal/ui/components"
 
+	// New modules for backup mode features
+	"dotsync/internal/backup"
+	"dotsync/internal/editor"
+	"dotsync/internal/modes"
+	"dotsync/internal/quicksync"
+	"dotsync/internal/suggestions"
+
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
@@ -47,15 +54,17 @@ const (
 	ScreenSetup Screen = iota
 	ScreenMain
 	ScreenScanning
-	ScreenSyncing // Sync progress screen
-	ScreenConfirm // Confirmation screen before pull
+	ScreenSyncing    // Sync progress screen
+	ScreenConfirm    // Confirmation screen before pull
 	ScreenHelp
-	ScreenDiff     // Diff viewer screen
-	ScreenGit      // Git operations screen
-	ScreenMerge    // Merge conflict resolution screen
-	ScreenCommit   // Commit message input screen
-	ScreenPreview  // File preview screen
-	ScreenSettings // Settings screen
+	ScreenDiff       // Diff viewer screen
+	ScreenGit        // Git operations screen
+	ScreenMerge      // Merge conflict resolution screen
+	ScreenCommit     // Commit message input screen
+	ScreenPreview    // File preview screen
+	ScreenSettings   // Settings screen
+	ScreenRestore    // Restore from another machine
+	ScreenQuickSync  // Quick sync progress/result
 )
 
 // Panel represents which panel is focused
@@ -164,6 +173,22 @@ type Model struct {
 	lastFileSelections map[string]bool // file path -> selected state
 	canUndo            bool
 
+	// New: Backup mode features
+	modesConfig   *modes.ModesConfig
+	quickSync     *quicksync.QuickSync
+	backupManager *backup.BackupManager
+	suggestion    *suggestions.Suggestion
+	editorInst    editor.Editor
+
+	// New: Quick sync state
+	quickSyncResult *quicksync.Result
+
+	// New: Restore dialog state
+	restoreMachines     []backup.Machine
+	restoreFiles        []backup.RestorableFile
+	restoreCursor       int
+	restoreSelectedMachine string
+
 	err error
 }
 
@@ -239,27 +264,43 @@ func New() *Model {
 	stateManager := sync.NewStateManager(config.ConfigDir())
 	stateManager.Load() // Load existing state if available
 
+	// Initialize modes config for sync/backup mode
+	modesCfg, _ := modes.Load()
+
+	// Initialize backup manager
+	backupMgr := backup.New(cfg, modesCfg)
+
+	// Initialize quick sync
+	qs := quicksync.New(cfg, modesCfg)
+
+	// Initialize editor (auto-detect)
+	editorInst, _ := editor.Detect(nil)
+
 	m := &Model{
-		config:       cfg,
-		stateManager: stateManager,
-		appList:      components.NewAppList(nil),
-		fileList:     components.NewFileList(),
-		diffView:     components.NewDiffView(),
-		mergeView:    components.NewMergeView(),
-		gitPanel:     components.NewGitPanel(),
-		filePreview:  components.NewFilePreview(),
-		spinner:      s,
-		progress:     prog,
-		help:         help.New(),
-		keys:         ui.DefaultKeyMap(),
-		textInput:    ti,
-		textArea:     ta,
-		screen:       ScreenMain,
-		focusedPanel: PanelApps,
-		status:       "Ready",
-		width:        80,
-		height:       24,
-		setupStep:    SetupWelcome,
+		config:        cfg,
+		stateManager:  stateManager,
+		modesConfig:   modesCfg,
+		backupManager: backupMgr,
+		quickSync:     qs,
+		editorInst:    editorInst,
+		appList:       components.NewAppList(nil),
+		fileList:      components.NewFileList(),
+		diffView:      components.NewDiffView(),
+		mergeView:     components.NewMergeView(),
+		gitPanel:      components.NewGitPanel(),
+		filePreview:   components.NewFilePreview(),
+		spinner:       s,
+		progress:      prog,
+		help:          help.New(),
+		keys:          ui.DefaultKeyMap(),
+		textInput:     ti,
+		textArea:      ta,
+		screen:        ScreenMain,
+		focusedPanel:  PanelApps,
+		status:        "Ready",
+		width:         80,
+		height:        24,
+		setupStep:     SetupWelcome,
 	}
 
 	if cfg.FirstRun {
@@ -574,6 +615,64 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "Scanning for apps..."
 			return m, m.scanApps
 		}
+
+	case quickSyncCompleteMsg:
+		m.syncing = false
+		if msg.result == nil {
+			m.status = "Quick sync failed"
+			return m, nil
+		}
+
+		if msg.result.Error != nil {
+			m.status = fmt.Sprintf("Quick sync error: %v", msg.result.Error)
+			return m, nil
+		}
+
+		m.status = msg.result.Summary()
+
+		// If there are pending sync files, show count
+		if msg.result.HasSyncPending() {
+			pendingInfo := ""
+			if msg.result.SyncLocalMod > 0 {
+				pendingInfo += fmt.Sprintf(" %d to push", msg.result.SyncLocalMod)
+			}
+			if msg.result.SyncRemoteMod > 0 {
+				pendingInfo += fmt.Sprintf(" %d to pull", msg.result.SyncRemoteMod)
+			}
+			if msg.result.SyncConflicts > 0 {
+				pendingInfo += fmt.Sprintf(" %d conflicts", msg.result.SyncConflicts)
+			}
+			m.status += " | Sync files:" + pendingInfo
+		}
+
+	case conflictCheckMsg:
+		if msg.detection == nil {
+			m.status = "Conflict check failed"
+			return m, nil
+		}
+
+		if msg.detection.IsAllSynced() {
+			m.status = "All files are synced"
+		} else {
+			parts := []string{}
+			if msg.detection.LocalModified > 0 {
+				parts = append(parts, fmt.Sprintf("%d modified (push)", msg.detection.LocalModified))
+			}
+			if msg.detection.RemoteUpdated > 0 {
+				parts = append(parts, fmt.Sprintf("%d outdated (pull)", msg.detection.RemoteUpdated))
+			}
+			if msg.detection.Conflicts > 0 {
+				parts = append(parts, fmt.Sprintf("%d conflicts", msg.detection.Conflicts))
+			}
+			m.status = "Status: " + strings.Join(parts, ", ")
+		}
+
+	case editorOpenedMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Editor error: %v", msg.err)
+		} else {
+			m.status = "Editor closed"
+		}
 	}
 
 	if m.screen == ScreenSetup && m.setupStep == SetupPath {
@@ -780,6 +879,35 @@ func (m *Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "0":
 		// Clear category filter
 		return m.clearCategoryFilter()
+
+	// New key bindings for backup mode features
+	case msg.String() == "q":
+		// Q: Quick Sync
+		return m.handleQuickSync()
+
+	case msg.String() == "e":
+		// E: Open in Editor
+		return m.handleOpenEditor()
+
+	case msg.String() == "c":
+		// C: Check conflicts
+		return m.handleCheckConflicts()
+
+	case msg.String() == "m":
+		// M: Toggle mode (Sync <-> Backup)
+		return m.handleToggleMode()
+
+	case msg.String() == "B":
+		// Shift+B: Set all Backup
+		return m.handleSetAllBackup()
+
+	case msg.String() == "r":
+		// R: Open Restore dialog
+		return m.handleRestore()
+
+	case msg.String() == "P":
+		// Shift+P: Push + Commit
+		return m.handlePushAndCommit()
 	}
 
 	return m, nil
@@ -1928,9 +2056,9 @@ func (m *Model) renderHelpBar() string {
 	// Show filter hint if category filter is active
 	if m.categoryFilter != "" {
 		items := []string{
-			ui.RenderHelpItem("0", "clear filter"),
-			ui.RenderHelpItem("/", "search"),
-			ui.RenderHelpItem("space", "toggle"),
+			ui.RenderHelpItem("0", "clear"),
+			ui.RenderHelpItem("space", "select"),
+			ui.RenderHelpItem("Q", "backup"),
 			ui.RenderHelpItem("p", "push"),
 			ui.RenderHelpItem("l", "pull"),
 			ui.RenderHelpItem("?", "help"),
@@ -1946,31 +2074,51 @@ func (m *Model) renderHelpBar() string {
 	hasSelection := len(selectedApps) > 0
 
 	if m.focusedPanel == PanelApps {
-		items = []string{
-			ui.RenderHelpItem("/", "search"),
-			ui.RenderHelpItem("1-9", "filter"),
-			ui.RenderHelpItem("space", "select"),
-			ui.RenderHelpItem("M", "mod"),
-			ui.RenderHelpItem("O", "outdated"),
-			ui.RenderHelpItem("tab", "→files"),
-		}
 		if hasSelection {
-			items = append(items, ui.RenderHelpItem("p", "push"), ui.RenderHelpItem("l", "pull"))
+			// Show sync actions when items are selected
+			items = []string{
+				ui.RenderHelpItem("Q", "backup"),
+				ui.RenderHelpItem("p", "push"),
+				ui.RenderHelpItem("l", "pull"),
+				ui.RenderHelpItem("t", "mode"),
+				ui.RenderHelpItem("tab", "→files"),
+				ui.RenderHelpItem("?", "help"),
+			}
+		} else {
+			// Show selection actions when nothing selected
+			items = []string{
+				ui.RenderHelpItem("space", "select"),
+				ui.RenderHelpItem("a", "all"),
+				ui.RenderHelpItem("M", "mod"),
+				ui.RenderHelpItem("O", "outdated"),
+				ui.RenderHelpItem("/", "search"),
+				ui.RenderHelpItem("1-9", "filter"),
+				ui.RenderHelpItem("?", "help"),
+			}
 		}
 	} else {
 		// Files panel - show file-specific actions
-		items = []string{
-			ui.RenderHelpItem("space", "select"),
-			ui.RenderHelpItem("v", "preview"),
-			ui.RenderHelpItem("d", "diff"),
-			ui.RenderHelpItem("tab", "→apps"),
-		}
 		if hasSelection {
-			items = append(items, ui.RenderHelpItem("p", "push"), ui.RenderHelpItem("l", "pull"))
+			items = []string{
+				ui.RenderHelpItem("Q", "backup"),
+				ui.RenderHelpItem("p", "push"),
+				ui.RenderHelpItem("l", "pull"),
+				ui.RenderHelpItem("d", "diff"),
+				ui.RenderHelpItem("e", "edit"),
+				ui.RenderHelpItem("tab", "→apps"),
+				ui.RenderHelpItem("?", "help"),
+			}
+		} else {
+			items = []string{
+				ui.RenderHelpItem("space", "select"),
+				ui.RenderHelpItem("v", "preview"),
+				ui.RenderHelpItem("d", "diff"),
+				ui.RenderHelpItem("e", "edit"),
+				ui.RenderHelpItem("tab", "→apps"),
+				ui.RenderHelpItem("?", "help"),
+			}
 		}
 	}
-
-	items = append(items, ui.RenderHelpItem("s", "rescan"), ui.RenderHelpItem("g", "git"), ui.RenderHelpItem("?", "help"))
 
 	return ui.HelpBarStyle.Render(strings.Join(items, "  "))
 }
@@ -1981,27 +2129,71 @@ func (m *Model) renderHelp() string {
 	b.WriteString(ui.PanelTitleStyle.Render("⌨️  Keyboard Shortcuts Guide"))
 	b.WriteString("\n\n")
 
+	// Quick Actions section (most important - at the top)
+	b.WriteString(ui.MutedStyle.Render("  ─── ⚡ Quick Actions ───"))
+	b.WriteString("\n")
+	quickBindings := []struct {
+		key  string
+		desc string
+	}{
+		{"Q", "Quick Sync: auto-backup [B] files to dotfiles"},
+		{"P", "Push + Commit: push selected + git commit"},
+		{"p", "Push: copy local → dotfiles (manual)"},
+		{"l", "Pull: copy dotfiles → local"},
+		{"c", "Check conflicts"},
+		{"e", "Open in editor (VS Code/Cursor/Zed)"},
+	}
+	for _, bind := range quickBindings {
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			ui.HelpKeyStyle.Width(14).Render(bind.key),
+			ui.HelpDescStyle.Render(bind.desc),
+		))
+	}
+
+	// Mode section - More detailed explanation
+	b.WriteString("\n")
+	b.WriteString(ui.MutedStyle.Render("  ─── 💾 Backup vs Sync Mode ───"))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("  %s  %s\n",
+		ui.HelpKeyStyle.Width(14).Render("[B] Backup"),
+		ui.HelpDescStyle.Render("Lưu riêng theo máy → Q tự động push"),
+	))
+	b.WriteString(fmt.Sprintf("  %s  %s\n",
+		ui.HelpKeyStyle.Width(14).Render("[S] Sync"),
+		ui.HelpDescStyle.Render("Giống nhau mọi máy → p/l thủ công"),
+	))
+	b.WriteString("\n")
+	modeBindings := []struct {
+		key  string
+		desc string
+	}{
+		{"t", "Toggle mode cho app/file đang chọn"},
+		{"S", "Đặt tất cả thành Sync mode"},
+		{"B", "Đặt tất cả thành Backup mode"},
+		{"R", "Restore config từ máy khác"},
+	}
+	for _, bind := range modeBindings {
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			ui.HelpKeyStyle.Width(14).Render(bind.key),
+			ui.HelpDescStyle.Render(bind.desc),
+		))
+	}
+
 	// Navigation section
-	b.WriteString(ui.MutedStyle.Render("  ─── Navigation ───"))
+	b.WriteString("\n")
+	b.WriteString(ui.MutedStyle.Render("  ─── 🧭 Navigation ───"))
 	b.WriteString("\n")
 	navBindings := []struct {
 		key  string
 		desc string
 	}{
 		{"/", "Search/filter apps"},
-		{"1-9", "Filter by category (AI, Shell, Editor...)"},
+		{"1-9", "Filter by category"},
 		{"0", "Clear category filter"},
-		{"↑/k", "Move cursor up"},
-		{"↓/j", "Move cursor down"},
-		{"Tab", "Switch between Apps/Files panels"},
-		{"Space", "Toggle selection"},
-		{"a", "Select all items"},
-		{"D", "Deselect all items"},
-		{"M", "Select all modified items"},
-		{"O", "Select all outdated items (need pull)"},
-		{"u", "Undo last selection change"},
-		{"PgUp/PgDn", "Scroll page up/down"},
-		{"Home/End", "Jump to first/last item"},
+		{"↑/k ↓/j", "Move cursor up/down"},
+		{"Tab", "Switch Apps ↔ Files panel"},
+		{"PgUp/PgDn", "Scroll page"},
+		{"Home/End", "Jump to first/last"},
 	}
 	for _, bind := range navBindings {
 		b.WriteString(fmt.Sprintf("  %s  %s\n",
@@ -2010,25 +2202,44 @@ func (m *Model) renderHelp() string {
 		))
 	}
 
-	// Sync Operations section
+	// Selection section
 	b.WriteString("\n")
-	b.WriteString(ui.MutedStyle.Render("  ─── Sync Operations ───"))
+	b.WriteString(ui.MutedStyle.Render("  ─── ✅ Selection ───"))
 	b.WriteString("\n")
-	syncBindings := []struct {
+	selBindings := []struct {
 		key  string
 		desc string
 	}{
-		{"p", "Push: Copy local → dotfiles repo"},
-		{"l", "Pull: Copy dotfiles → local"},
-		{"d", "View diff for selected file"},
-		{"v", "Preview file content"},
+		{"Space", "Toggle selection"},
+		{"a", "Select all"},
+		{"D", "Deselect all"},
+		{"M", "Select all modified (need push)"},
+		{"O", "Select all outdated (need pull)"},
+		{"u", "Undo last selection"},
+	}
+	for _, bind := range selBindings {
+		b.WriteString(fmt.Sprintf("  %s  %s\n",
+			ui.HelpKeyStyle.Width(14).Render(bind.key),
+			ui.HelpDescStyle.Render(bind.desc),
+		))
+	}
+
+	// File Actions section
+	b.WriteString("\n")
+	b.WriteString(ui.MutedStyle.Render("  ─── 📄 File Actions ───"))
+	b.WriteString("\n")
+	fileBindings := []struct {
+		key  string
+		desc string
+	}{
+		{"v/Enter", "Preview file content"},
+		{"d", "View diff (local vs dotfiles)"},
 		{"m", "Merge conflicts"},
 		{"s", "Rescan all apps"},
-		{"b", "Export Brewfile to dotfiles"},
+		{"b", "Export Brewfile"},
 		{"r", "Refresh current view"},
-		{"S", "Open settings (edit paths)"},
 	}
-	for _, bind := range syncBindings {
+	for _, bind := range fileBindings {
 		b.WriteString(fmt.Sprintf("  %s  %s\n",
 			ui.HelpKeyStyle.Width(14).Render(bind.key),
 			ui.HelpDescStyle.Render(bind.desc),
@@ -2037,21 +2248,19 @@ func (m *Model) renderHelp() string {
 
 	// Git Operations section
 	b.WriteString("\n")
-	b.WriteString(ui.MutedStyle.Render("  ─── Git Panel (press 'g') ───"))
+	b.WriteString(ui.MutedStyle.Render("  ─── 🔀 Git (press 'g') ───"))
 	b.WriteString("\n")
 	gitBindings := []struct {
 		key  string
 		desc string
 	}{
-		{"g", "Open git operations panel"},
-		{"a", "Stage all changes"},
-		{"c", "Commit staged changes"},
-		{"p", "Push to remote"},
-		{"f", "Fetch from remote"},
-		{"l", "Pull from remote"},
-		{"s/S", "Stash / Stash pop"},
-		{"b", "Switch branch mode"},
-		{"Enter", "Checkout selected branch"},
+		{"g", "Open git panel"},
+		{"a", "Stage all"},
+		{"c", "Commit"},
+		{"p", "Push"},
+		{"f", "Fetch"},
+		{"l", "Pull"},
+		{"b", "Switch branch"},
 	}
 	for _, bind := range gitBindings {
 		b.WriteString(fmt.Sprintf("  %s  %s\n",
@@ -2060,37 +2269,17 @@ func (m *Model) renderHelp() string {
 		))
 	}
 
-	// Diff/Merge section
-	b.WriteString("\n")
-	b.WriteString(ui.MutedStyle.Render("  ─── Diff & Merge View ───"))
-	b.WriteString("\n")
-	diffBindings := []struct {
-		key  string
-		desc string
-	}{
-		{"←/h", "Keep local version"},
-		{"→/l", "Use dotfiles version"},
-		{"n/N", "Next/previous hunk"},
-		{"1/2/3", "Choose resolution option"},
-	}
-	for _, bind := range diffBindings {
-		b.WriteString(fmt.Sprintf("  %s  %s\n",
-			ui.HelpKeyStyle.Width(14).Render(bind.key),
-			ui.HelpDescStyle.Render(bind.desc),
-		))
-	}
-
 	// General section
 	b.WriteString("\n")
-	b.WriteString(ui.MutedStyle.Render("  ─── General ───"))
+	b.WriteString(ui.MutedStyle.Render("  ─── ⚙️ General ───"))
 	b.WriteString("\n")
 	generalBindings := []struct {
 		key  string
 		desc string
 	}{
-		{"?", "Toggle this help screen"},
-		{"ESC", "Go back / Cancel"},
-		{"q/Ctrl+C", "Quit application"},
+		{"?", "Toggle this help"},
+		{"Esc", "Go back / Cancel"},
+		{"q", "Quit"},
 	}
 	for _, bind := range generalBindings {
 		b.WriteString(fmt.Sprintf("  %s  %s\n",
@@ -2108,11 +2297,11 @@ func (m *Model) renderHelp() string {
 		desc string
 	}{
 		{"✓", "Synced - Files are identical"},
-		{"●", "Modified - Local has changes (push suggested)"},
-		{"○", "Outdated - Dotfiles has updates (pull suggested)"},
-		{"⚡", "Conflict - Both sides changed (needs merge)"},
-		{"+", "New - Only exists locally"},
-		{"↓", "Missing - Only in dotfiles"},
+		{"●", "Modified - Local has changes (push)"},
+		{"○", "Outdated - Dotfiles has updates (pull)"},
+		{"⚡", "Conflict - Both sides changed"},
+		{"[S]", "Sync mode - Same on all machines"},
+		{"[B]", "Backup mode - Per-machine storage"},
 	}
 	for _, icon := range statusIcons {
 		b.WriteString(fmt.Sprintf("  %s  %s\n",
@@ -2121,22 +2310,21 @@ func (m *Model) renderHelp() string {
 		))
 	}
 
-	// How it works
+	// Quick reference - Backup explanation
 	b.WriteString("\n")
-	b.WriteString(ui.PanelTitleStyle.Render("📖 How it works"))
+	b.WriteString(ui.PanelTitleStyle.Render("💡 Cách hoạt động"))
 	b.WriteString("\n\n")
-	b.WriteString("  ")
-	b.WriteString(ui.HelpKeyStyle.Render("Push"))
-	b.WriteString("  Save your local configs to your dotfiles git repo\n")
-	b.WriteString("  ")
-	b.WriteString(ui.HelpKeyStyle.Render("Pull"))
-	b.WriteString("  Restore configs from dotfiles repo to this machine\n")
-	b.WriteString("  ")
-	b.WriteString(ui.HelpKeyStyle.Render("Diff"))
-	b.WriteString("  Compare local vs dotfiles side-by-side\n")
-	b.WriteString("  ")
-	b.WriteString(ui.HelpKeyStyle.Render("Merge"))
-	b.WriteString("  Resolve conflicts when both sides changed\n")
+	b.WriteString(ui.MutedStyle.Render("  Backup mode [B]:"))
+	b.WriteString("\n")
+	b.WriteString("    • Mỗi máy có folder riêng: dotfiles/app/{machine}/\n")
+	b.WriteString("    • Nhấn Q → tự động push lên folder của máy này\n")
+	b.WriteString("    • Dùng R để restore config từ máy khác\n")
+	b.WriteString("\n")
+	b.WriteString(ui.MutedStyle.Render("  Sync mode [S]:"))
+	b.WriteString("\n")
+	b.WriteString("    • Một bản duy nhất: dotfiles/app/file\n")
+	b.WriteString("    • Nhấn p để push, l để pull (thủ công)\n")
+	b.WriteString("    • Giống nhau trên mọi máy\n")
 	b.WriteString("\n")
 	b.WriteString(ui.MutedStyle.Render("  Press any key to close"))
 
@@ -2802,6 +2990,290 @@ func (m *Model) handleUndo() (tea.Model, tea.Cmd) {
 	m.canUndo = false
 	m.status = "Selection restored"
 	return m, nil
+}
+
+// handleQuickSync runs the Quick Sync workflow
+func (m *Model) handleQuickSync() (tea.Model, tea.Cmd) {
+	if m.quickSync == nil {
+		m.status = "Quick sync not initialized"
+		return m, nil
+	}
+
+	selectedApps := m.appList.SelectedApps()
+	if len(selectedApps) == 0 {
+		m.status = "No apps selected"
+		return m, nil
+	}
+
+	m.status = "Running quick sync..."
+	m.syncing = true
+
+	return m, func() tea.Msg {
+		result := m.quickSync.Run(selectedApps)
+		return quickSyncCompleteMsg{result: result}
+	}
+}
+
+// quickSyncCompleteMsg is sent when quick sync completes
+type quickSyncCompleteMsg struct {
+	result *quicksync.Result
+}
+
+// handleToggleMode toggles the mode for the selected app/file
+func (m *Model) handleToggleMode() (tea.Model, tea.Cmd) {
+	if m.modesConfig == nil {
+		m.status = "Modes not initialized"
+		return m, nil
+	}
+
+	if m.focusedPanel == PanelApps {
+		// Toggle app mode
+		currentApp := m.appList.Current()
+		if currentApp == nil {
+			m.status = "No app selected"
+			return m, nil
+		}
+
+		newMode := m.modesConfig.ToggleAppMode(currentApp.ID)
+		if err := m.modesConfig.Save(); err != nil {
+			m.status = fmt.Sprintf("Failed to save mode: %v", err)
+			return m, nil
+		}
+
+		m.status = fmt.Sprintf("%s mode: %s", currentApp.Name, newMode.String())
+		m.appList.SetModesConfig(m.modesConfig)
+		m.updateFileList()
+	} else {
+		// Toggle file mode
+		currentApp := m.appList.Current()
+		currentFile := m.fileList.Current()
+		if currentApp == nil || currentFile == nil {
+			m.status = "No file selected"
+			return m, nil
+		}
+
+		newMode := m.modesConfig.ToggleFileMode(currentApp.ID, currentFile.Path)
+		if err := m.modesConfig.Save(); err != nil {
+			m.status = fmt.Sprintf("Failed to save mode: %v", err)
+			return m, nil
+		}
+
+		m.status = fmt.Sprintf("%s mode: %s", currentFile.Name, newMode.String())
+		m.fileList.SetModesConfig(m.modesConfig)
+	}
+
+	return m, nil
+}
+
+// handleSetAllSync sets all visible items to Sync mode
+func (m *Model) handleSetAllSync() (tea.Model, tea.Cmd) {
+	if m.modesConfig == nil {
+		m.status = "Modes not initialized"
+		return m, nil
+	}
+
+	// Get app IDs from visible apps
+	var appIDs []string
+	displayedApps := m.appList.VisibleApps()
+	for _, app := range displayedApps {
+		appIDs = append(appIDs, app.ID)
+	}
+
+	if len(appIDs) == 0 {
+		m.status = "No apps to update"
+		return m, nil
+	}
+
+	m.modesConfig.SetAllAppsMode(appIDs, modes.ModeSync)
+	if err := m.modesConfig.Save(); err != nil {
+		m.status = fmt.Sprintf("Failed to save: %v", err)
+		return m, nil
+	}
+
+	m.appList.SetModesConfig(m.modesConfig)
+	m.updateFileList()
+	m.status = fmt.Sprintf("Set %d apps to Sync mode", len(appIDs))
+	return m, nil
+}
+
+// handleSetAllBackup sets all visible items to Backup mode
+func (m *Model) handleSetAllBackup() (tea.Model, tea.Cmd) {
+	if m.modesConfig == nil {
+		m.status = "Modes not initialized"
+		return m, nil
+	}
+
+	// Get app IDs from visible apps
+	var appIDs []string
+	displayedApps := m.appList.VisibleApps()
+	for _, app := range displayedApps {
+		appIDs = append(appIDs, app.ID)
+	}
+
+	if len(appIDs) == 0 {
+		m.status = "No apps to update"
+		return m, nil
+	}
+
+	m.modesConfig.SetAllAppsMode(appIDs, modes.ModeBackup)
+	if err := m.modesConfig.Save(); err != nil {
+		m.status = fmt.Sprintf("Failed to save: %v", err)
+		return m, nil
+	}
+
+	m.appList.SetModesConfig(m.modesConfig)
+	m.updateFileList()
+	m.status = fmt.Sprintf("Set %d apps to Backup mode", len(appIDs))
+	return m, nil
+}
+
+// handleRestore opens the restore from machine dialog
+func (m *Model) handleRestore() (tea.Model, tea.Cmd) {
+	if m.backupManager == nil {
+		m.status = "Backup manager not initialized"
+		return m, nil
+	}
+
+	// Load available machines
+	machines, err := m.backupManager.ListMachines()
+	if err != nil {
+		m.status = fmt.Sprintf("Failed to list machines: %v", err)
+		return m, nil
+	}
+
+	if len(machines) == 0 {
+		m.status = "No backup machines found"
+		return m, nil
+	}
+
+	m.restoreMachines = machines
+	m.restoreCursor = 0
+	m.status = "Select machine to restore from"
+	// TODO: Switch to restore screen when implemented
+	m.status = fmt.Sprintf("Found %d machines with backups. Restore screen coming soon.", len(machines))
+	return m, nil
+}
+
+// handleCheckConflicts runs conflict detection and displays results
+func (m *Model) handleCheckConflicts() (tea.Model, tea.Cmd) {
+	if m.quickSync == nil {
+		m.status = "Quick sync not initialized"
+		return m, nil
+	}
+
+	selectedApps := m.appList.SelectedApps()
+	if len(selectedApps) == 0 {
+		selectedApps = m.apps
+	}
+
+	m.status = "Checking for conflicts..."
+
+	return m, func() tea.Msg {
+		detection := m.quickSync.DetectOnly(selectedApps)
+		return conflictCheckMsg{detection: detection}
+	}
+}
+
+// conflictCheckMsg is sent when conflict check completes
+type conflictCheckMsg struct {
+	detection *quicksync.DetectionResult
+}
+
+// handleOpenEditor opens the current file in the configured editor
+func (m *Model) handleOpenEditor() (tea.Model, tea.Cmd) {
+	if m.focusedPanel != PanelFiles {
+		m.status = "Select a file first (Tab to switch panel)"
+		return m, nil
+	}
+
+	currentFile := m.fileList.Current()
+	if currentFile == nil {
+		m.status = "No file selected"
+		return m, nil
+	}
+
+	// Detect and open editor
+	ed, err := editor.Detect(nil)
+	if err != nil {
+		m.status = fmt.Sprintf("No editor found: %v", err)
+		return m, nil
+	}
+
+	m.status = fmt.Sprintf("Opening %s in %s...", currentFile.Name, ed.Name())
+
+	return m, func() tea.Msg {
+		err := ed.OpenDiff(currentFile.Path, currentFile.Path)
+		return editorOpenedMsg{err: err}
+	}
+}
+
+// editorOpenedMsg is sent when editor operation completes
+type editorOpenedMsg struct {
+	err error
+}
+
+// handlePushAndCommit pushes changes and commits with auto-generated message
+func (m *Model) handlePushAndCommit() (tea.Model, tea.Cmd) {
+	selectedApps := m.appList.SelectedApps()
+	if len(selectedApps) == 0 {
+		m.status = "No apps selected"
+		return m, nil
+	}
+
+	// Count selected files
+	fileCount := 0
+	var appNames []string
+	for _, app := range selectedApps {
+		hasFiles := false
+		for _, file := range app.Files {
+			if file.Selected {
+				fileCount++
+				hasFiles = true
+			}
+		}
+		if hasFiles {
+			appNames = append(appNames, app.ID)
+		}
+	}
+
+	if fileCount == 0 {
+		m.status = "No files selected"
+		return m, nil
+	}
+
+	m.status = "Pushing and committing..."
+	m.syncing = true
+
+	return m, func() tea.Msg {
+		// Export files first
+		exporter := sync.NewExporter(m.config)
+		results, err := exporter.ExportAll(selectedApps)
+		if err != nil {
+			return syncCompleteMsg{err: err, action: "push"}
+		}
+
+		// Generate commit message
+		var commitMsg string
+		if len(appNames) == 1 {
+			commitMsg = fmt.Sprintf("sync: update %s (%d files)", appNames[0], fileCount)
+		} else if len(appNames) <= 3 {
+			commitMsg = fmt.Sprintf("sync: update %s", strings.Join(appNames, ", "))
+		} else {
+			commitMsg = fmt.Sprintf("sync: update %d apps (%d files)", len(appNames), fileCount)
+		}
+
+		// Commit and push
+		gitRepo := git.NewRepo(m.config.DotfilesPath)
+		if gitRepo.IsRepo() {
+			gitRepo.AddAll()
+			gitRepo.Commit(commitMsg)
+			if gitRepo.HasRemote() {
+				gitRepo.Push()
+			}
+		}
+
+		return syncCompleteMsg{results: results, action: "push+commit"}
+	}
 }
 
 func main() {
