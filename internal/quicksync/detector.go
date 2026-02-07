@@ -194,12 +194,12 @@ func (d *ConflictDetector) detectFileState(appID string, file models.File) FileI
 	synced := d.modesConfig.IsSynced(appID, file.Path)
 
 	// Always use backup path as the primary dotfiles path
-	dotfilesPath := d.modesConfig.GetBackupPath(d.config.DotfilesPath, appID, file.Path)
+	dotfilesPath := d.modesConfig.GetBackupPath(d.config.DotfilesPath, appID, file.RelPath)
 
 	// Sync path (shared copy) only when synced
 	var syncPath string
 	if synced {
-		syncPath = d.modesConfig.GetSyncPath(d.config.DotfilesPath, appID, file.Path)
+		syncPath = d.modesConfig.GetSyncPath(d.config.DotfilesPath, appID, file.RelPath)
 	}
 
 	info := FileInfo{

@@ -73,6 +73,7 @@ func TestBackup(t *testing.T) {
 			Files: []models.File{
 				{
 					Name:     ".zshrc",
+					RelPath:  ".zshrc",
 					Path:     testFile,
 					Selected: true,
 					Size:     13,
@@ -118,6 +119,7 @@ func TestBackupAlwaysBackupsRegardlessOfSync(t *testing.T) {
 			Files: []models.File{
 				{
 					Name:     ".zshrc",
+					RelPath:  ".zshrc",
 					Path:     testFile,
 					Selected: true,
 				},

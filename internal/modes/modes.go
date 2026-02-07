@@ -199,15 +199,13 @@ func (m *ModesConfig) AppSyncLabel(appID string) string {
 }
 
 // GetBackupPath returns the storage path for a backup (per-machine) file
-// Format: dotfiles/{app}/{machine}/{file}
-func (m *ModesConfig) GetBackupPath(basePath, appID, filePath string) string {
-	filename := filepath.Base(filePath)
-	return filepath.Join(basePath, appID, m.MachineName, filename)
+// Format: dotfiles/{app}/{machine}/{relPath}
+func (m *ModesConfig) GetBackupPath(basePath, appID, relPath string) string {
+	return filepath.Join(basePath, appID, m.MachineName, relPath)
 }
 
 // GetSyncPath returns the storage path for a shared (sync) file
-// Format: dotfiles/{app}/{file}
-func (m *ModesConfig) GetSyncPath(basePath, appID, filePath string) string {
-	filename := filepath.Base(filePath)
-	return filepath.Join(basePath, appID, filename)
+// Format: dotfiles/{app}/{relPath}
+func (m *ModesConfig) GetSyncPath(basePath, appID, relPath string) string {
+	return filepath.Join(basePath, appID, relPath)
 }

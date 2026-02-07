@@ -265,17 +265,31 @@ func TestStoragePaths(t *testing.T) {
 
 	basePath := "/home/user/dotfiles"
 
-	// Backup path
+	// Backup path - simple file
 	backupPath := cfg.GetBackupPath(basePath, "zsh", ".zshrc")
 	expected := "/home/user/dotfiles/zsh/my-machine/.zshrc"
 	if backupPath != expected {
 		t.Errorf("GetBackupPath = %s, want %s", backupPath, expected)
 	}
 
-	// Sync path
+	// Backup path - nested relPath
+	backupPath = cfg.GetBackupPath(basePath, "claude-code", "skills/file-organizer/SKILL.md")
+	expected = "/home/user/dotfiles/claude-code/my-machine/skills/file-organizer/SKILL.md"
+	if backupPath != expected {
+		t.Errorf("GetBackupPath nested = %s, want %s", backupPath, expected)
+	}
+
+	// Sync path - simple file
 	syncPath := cfg.GetSyncPath(basePath, "git", ".gitconfig")
 	expected = "/home/user/dotfiles/git/.gitconfig"
 	if syncPath != expected {
 		t.Errorf("GetSyncPath = %s, want %s", syncPath, expected)
+	}
+
+	// Sync path - nested relPath
+	syncPath = cfg.GetSyncPath(basePath, "claude-code", "skills/file-organizer/SKILL.md")
+	expected = "/home/user/dotfiles/claude-code/skills/file-organizer/SKILL.md"
+	if syncPath != expected {
+		t.Errorf("GetSyncPath nested = %s, want %s", syncPath, expected)
 	}
 }

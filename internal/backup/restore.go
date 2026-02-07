@@ -190,13 +190,14 @@ func (b *BackupManager) GetRestorableFiles(sourceMachine string) ([]RestorableFi
 			return nil
 		}
 
-		// Parse path: appID/machineName/fileName
+		// Parse path: appID/machineName/...relPath...
 		parts := splitPath(rel)
-		if len(parts) != 3 {
+		if len(parts) < 3 {
 			return nil
 		}
 
-		appID, machineName, fileName := parts[0], parts[1], parts[2]
+		appID, machineName := parts[0], parts[1]
+		fileName := filepath.Join(parts[2:]...)
 
 		if machineName != sourceMachine {
 			return nil

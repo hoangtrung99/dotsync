@@ -86,7 +86,7 @@ func (b *BackupManager) Backup(apps []*models.App) (*BackupResult, error) {
 			}
 
 			// Always backup - copy to machine folder
-			destPath := b.getBackupDestPath(app.ID, file.Name)
+			destPath := b.getBackupDestPath(app.ID, file.RelPath)
 			if err := b.copyFile(file.Path, destPath); err != nil {
 				result.Errors = append(result.Errors, BackupError{
 					AppID:    app.ID,
@@ -117,7 +117,7 @@ func (b *BackupManager) Backup(apps []*models.App) (*BackupResult, error) {
 
 // BackupFile backs up a single file
 func (b *BackupManager) BackupFile(appID string, file models.File) error {
-	destPath := b.getBackupDestPath(appID, file.Name)
+	destPath := b.getBackupDestPath(appID, file.RelPath)
 	if err := b.copyFile(file.Path, destPath); err != nil {
 		return err
 	}
@@ -180,8 +180,8 @@ func (b *BackupManager) GetMachineBackupPath(appID, machineName, fileName string
 }
 
 // getBackupDestPath returns the destination path for a backup file
-func (b *BackupManager) getBackupDestPath(appID, fileName string) string {
-	return filepath.Join(b.config.DotfilesPath, appID, b.modesConfig.MachineName, fileName)
+func (b *BackupManager) getBackupDestPath(appID, relPath string) string {
+	return filepath.Join(b.config.DotfilesPath, appID, b.modesConfig.MachineName, relPath)
 }
 
 // copyFile copies a file from src to dst, creating directories as needed

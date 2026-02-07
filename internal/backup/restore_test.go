@@ -28,7 +28,7 @@ func TestGetRestorableFiles(t *testing.T) {
 	_, bm, cleanup := setupTestEnv(t)
 	defer cleanup()
 
-	// Create backup structure
+	// Create backup structure - flat files
 	machine1Dir := filepath.Join(bm.config.DotfilesPath, "zsh", "machine-1")
 	machine2Dir := filepath.Join(bm.config.DotfilesPath, "nvim", "machine-1")
 	os.MkdirAll(machine1Dir, 0755)
@@ -36,13 +36,33 @@ func TestGetRestorableFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(machine1Dir, ".zshrc"), []byte("zsh"), 0644)
 	os.WriteFile(filepath.Join(machine2Dir, "init.lua"), []byte("lua"), 0644)
 
+	// Create backup structure - nested path
+	nestedDir := filepath.Join(bm.config.DotfilesPath, "claude-code", "machine-1", "skills", "file-organizer")
+	os.MkdirAll(nestedDir, 0755)
+	os.WriteFile(filepath.Join(nestedDir, "SKILL.md"), []byte("skill"), 0644)
+
 	files, err := bm.GetRestorableFiles("machine-1")
 	if err != nil {
 		t.Fatalf("get restorable files failed: %v", err)
 	}
 
-	if len(files) != 2 {
-		t.Errorf("expected 2 files, got %d", len(files))
+	if len(files) != 3 {
+		t.Errorf("expected 3 files, got %d", len(files))
+	}
+
+	// Find the nested file and verify its fileName preserves structure
+	foundNested := false
+	for _, f := range files {
+		if f.AppID == "claude-code" {
+			foundNested = true
+			expected := filepath.Join("skills", "file-organizer", "SKILL.md")
+			if f.FileName != expected {
+				t.Errorf("nested FileName = %s, want %s", f.FileName, expected)
+			}
+		}
+	}
+	if !foundNested {
+		t.Error("expected to find nested file for claude-code app")
 	}
 }
 
