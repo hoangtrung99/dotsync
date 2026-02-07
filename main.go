@@ -262,7 +262,7 @@ func New() *Model {
 
 	// Initialize state manager for conflict detection
 	stateManager := sync.NewStateManager(config.ConfigDir())
-	stateManager.Load() // Load existing state if available
+	_ = stateManager.Load() // Load existing state if available
 
 	// Initialize modes config for sync/backup mode
 	modesCfg, _ := modes.Load()
@@ -557,7 +557,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Save state after sync
 			if m.stateManager != nil {
-				m.stateManager.Save()
+				_ = m.stateManager.Save()
 			}
 
 			action := "Pushed"
@@ -1403,7 +1403,7 @@ func (m *Model) handleMergeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					newHash,
 					newHash,
 				)
-				m.stateManager.Save()
+				_ = m.stateManager.Save()
 			}
 		} else {
 			m.status = fmt.Sprintf("Resolve all hunks first (%d/%d)",
@@ -3246,10 +3246,10 @@ func (m *Model) handlePushAndCommit() (tea.Model, tea.Cmd) {
 		// Commit and push
 		gitRepo := git.NewRepo(m.config.DotfilesPath)
 		if gitRepo.IsRepo() {
-			gitRepo.AddAll()
-			gitRepo.Commit(commitMsg)
+			_ = gitRepo.AddAll()
+			_ = gitRepo.Commit(commitMsg)
 			if gitRepo.HasRemote() {
-				gitRepo.Push()
+				_ = gitRepo.Push()
 			}
 		}
 

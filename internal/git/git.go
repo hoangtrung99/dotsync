@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -156,7 +157,7 @@ func (r *Repo) calculateAheadBehind(status *Status) {
 	// Get local commits
 	localIter, err := r.repo.Log(&git.LogOptions{From: localHash})
 	if err == nil {
-		localIter.ForEach(func(c *object.Commit) error {
+		_ = localIter.ForEach(func(c *object.Commit) error {
 			localCommits[c.Hash] = true
 			return nil
 		})
@@ -165,7 +166,7 @@ func (r *Repo) calculateAheadBehind(status *Status) {
 	// Get remote commits
 	remoteIter, err := r.repo.Log(&git.LogOptions{From: remoteHeadHash})
 	if err == nil {
-		remoteIter.ForEach(func(c *object.Commit) error {
+		_ = remoteIter.ForEach(func(c *object.Commit) error {
 			remoteCommits[c.Hash] = true
 			return nil
 		})
@@ -226,7 +227,7 @@ func (r *Repo) AddAll() error {
 			return err
 		}
 		for path := range status {
-			worktree.Add(path)
+			_, _ = worktree.Add(path)
 		}
 	}
 	return nil
@@ -243,7 +244,13 @@ func (r *Repo) Commit(message string) error {
 		return err
 	}
 
-	_, err = worktree.Commit(message, &git.CommitOptions{})
+	_, err = worktree.Commit(message, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "dotsync",
+			Email: "dotsync@local",
+			When:  time.Now(),
+		},
+	})
 	return err
 }
 
@@ -346,7 +353,7 @@ func (r *Repo) Branches() []string {
 	}
 
 	var branches []string
-	branchRefs.ForEach(func(ref *plumbing.Reference) error {
+	_ = branchRefs.ForEach(func(ref *plumbing.Reference) error {
 		branches = append(branches, ref.Name().Short())
 		return nil
 	})
@@ -389,7 +396,7 @@ func (r *Repo) Log(count int) ([]CommitInfo, error) {
 
 	var commits []CommitInfo
 	i := 0
-	err = commitIter.ForEach(func(c *object.Commit) error {
+	_ = commitIter.ForEach(func(c *object.Commit) error {
 		if i >= count {
 			return fmt.Errorf("done")
 		}

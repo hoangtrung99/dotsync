@@ -241,7 +241,7 @@ func (r *Resolver) CommitChanges(message string, files []FileInfo) error {
 		if err != nil {
 			continue
 		}
-		r.gitRepo.Add(relPath)
+		_ = r.gitRepo.Add(relPath)
 	}
 
 	// Commit
@@ -313,7 +313,7 @@ func (r *Resolver) ResolveAuto(detection *DetectionResult) *ResolveAutoResult {
 			if res.Action == ActionPush && res.Error == nil {
 				successfulPushes = append(successfulPushes, res.File)
 				// Update sync state
-				r.UpdateSyncState(res.File)
+				_ = r.UpdateSyncState(res.File)
 			}
 		}
 
@@ -328,7 +328,7 @@ func (r *Resolver) ResolveAuto(detection *DetectionResult) *ResolveAutoResult {
 		}
 
 		// Save sync state
-		r.detector.SaveState()
+		_ = r.detector.SaveState()
 	}
 
 	// Collect sync files that need manual action

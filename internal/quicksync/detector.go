@@ -125,7 +125,7 @@ type ConflictDetector struct {
 // NewConflictDetector creates a new ConflictDetector
 func NewConflictDetector(cfg *config.Config, modesCfg *modes.ModesConfig) *ConflictDetector {
 	stateManager := sync.NewStateManager(config.ConfigDir())
-	stateManager.Load()
+	_ = stateManager.Load()
 
 	return &ConflictDetector{
 		config:       cfg,

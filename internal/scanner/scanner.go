@@ -30,6 +30,7 @@ type Scanner struct {
 	configPath string
 	homeDir    string
 	brewApps   map[string]bool // Apps installed via Homebrew
+	brewMu     sync.RWMutex    // Protects brewApps from concurrent access
 }
 
 // New creates a new Scanner
@@ -58,7 +59,9 @@ func (s *Scanner) loadBrewApps() {
 		for _, app := range strings.Split(string(out), "\n") {
 			app = strings.TrimSpace(app)
 			if app != "" {
+				s.brewMu.Lock()
 				s.brewApps[strings.ToLower(app)] = true
+				s.brewMu.Unlock()
 			}
 		}
 	}
@@ -69,16 +72,23 @@ func (s *Scanner) loadBrewApps() {
 		for _, app := range strings.Split(string(out), "\n") {
 			app = strings.TrimSpace(app)
 			if app != "" {
+				s.brewMu.Lock()
 				s.brewApps[strings.ToLower(app)] = true
+				s.brewMu.Unlock()
 			}
 		}
 	}
 
-	debugLog("Loaded %d Homebrew apps in %v", len(s.brewApps), time.Since(start))
+	s.brewMu.RLock()
+	count := len(s.brewApps)
+	s.brewMu.RUnlock()
+	debugLog("Loaded %d Homebrew apps in %v", count, time.Since(start))
 }
 
 // IsBrewInstalled checks if an app is installed via Homebrew
 func (s *Scanner) IsBrewInstalled(appName string) bool {
+	s.brewMu.RLock()
+	defer s.brewMu.RUnlock()
 	return s.brewApps[strings.ToLower(appName)]
 }
 

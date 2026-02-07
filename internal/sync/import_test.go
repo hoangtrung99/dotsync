@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"dotsync/internal/config"
 	"dotsync/internal/models"
@@ -597,7 +598,11 @@ func TestCompareFiles_DotfilesNewer(t *testing.T) {
 	// Create local first
 	os.WriteFile(localFile, []byte("old"), 0644)
 
-	// Wait and create dotfiles file
+	// Set local file to an older time
+	oldTime := time.Now().Add(-2 * time.Second)
+	os.Chtimes(localFile, oldTime, oldTime)
+
+	// Create dotfiles file (will have current time, newer than local)
 	os.WriteFile(dotfilesFile, []byte("new"), 0644)
 
 	status := CompareFiles(localFile, dotfilesFile)

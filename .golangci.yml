@@ -1,0 +1,59 @@
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  errcheck:
+    exclude-functions:
+      - (io.Closer).Close
+      - os.Remove
+      - os.RemoveAll
+      - os.Rename
+      - os.Chmod
+      - os.Chtimes
+      - os.MkdirAll
+      - os.Setenv
+      - io.Copy
+      - (github.com/go-git/go-git/v5/plumbing/storer.ReferenceStorer).SetReference
+      - (*github.com/go-git/go-git/v5.Repository).CreateBranch
+  staticcheck:
+    checks:
+      - all
+      - "-SA1019" # Deprecated API usage (viewport methods)
+
+issues:
+  exclude-rules:
+    # Test files: ignore errcheck and staticcheck noise
+    - path: _test\.go
+      linters:
+        - errcheck
+    - path: _test\.go
+      linters:
+        - staticcheck
+      text: "SA4017|SA5011|SA9003"
+    # main.go: large TUI file, ignore some warnings
+    - path: main\.go
+      linters:
+        - unused
+      text: "field .* is unused"
+    - path: main\.go
+      linters:
+        - gosimple
+      text: "S1023"
+    - path: main\.go
+      linters:
+        - staticcheck
+      text: "SA9003"
+    - path: main\.go
+      linters:
+        - ineffassign
+    # config_test.go: empty branch is intentional
+    - path: config_test\.go
+      linters:
+        - staticcheck
+      text: "SA9003"
