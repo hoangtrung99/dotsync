@@ -271,6 +271,7 @@ func (g *GitPanel) renderFooter() string {
 			ui.RenderHelpItem("l", "pull"),
 			ui.RenderHelpItem("s", "stash"),
 			ui.RenderHelpItem("b", "branches"),
+			ui.RenderHelpItem("L", "lazygit"),
 			ui.RenderHelpItem("r", "refresh"),
 			ui.RenderHelpItem("ESC", "back"),
 		}

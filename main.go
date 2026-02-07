@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -235,6 +236,10 @@ type refreshCompleteMsg struct {
 	apps           []*models.App
 	err            error
 	categoryFilter string
+}
+
+type lazygitFinishedMsg struct {
+	err error
 }
 
 func New() *Model {
@@ -678,6 +683,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Editor error: %v", msg.err)
 		} else {
 			m.status = "Editor closed"
+		}
+
+	case lazygitFinishedMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Lazygit error: %v", msg.err)
+		} else {
+			m.status = "Lazygit closed"
+		}
+		// Refresh git panel after lazygit exits
+		if m.screen == ScreenGit {
+			m.gitPanel.Refresh()
 		}
 	}
 
@@ -2311,6 +2327,7 @@ func (m *Model) renderHelp() string {
 		{"f", "Fetch"},
 		{"l", "Pull"},
 		{"b", "Switch branch"},
+		{"L", "Open lazygit (if installed)"},
 	}
 	for _, bind := range gitBindings {
 		b.WriteString(fmt.Sprintf("  %s  %s\n",
@@ -2623,6 +2640,10 @@ func (m *Model) handleGitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "L":
+		// Open lazygit
+		return m.handleLazygit()
+
 	case "j", "down":
 		m.gitPanel.MoveDown()
 		return m, nil
@@ -2668,6 +2689,20 @@ func (m *Model) handleGitBranchKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// handleLazygit opens lazygit in the dotfiles directory
+func (m *Model) handleLazygit() (tea.Model, tea.Cmd) {
+	lazygitPath, err := exec.LookPath("lazygit")
+	if err != nil {
+		m.status = "lazygit not found — install: brew install lazygit"
+		return m, nil
+	}
+
+	c := exec.Command(lazygitPath, "-p", m.config.DotfilesPath)
+	return m, tea.ExecProcess(c, func(err error) tea.Msg {
+		return lazygitFinishedMsg{err: err}
+	})
 }
 
 // handleCommitKeys handles keys in the commit message dialog
