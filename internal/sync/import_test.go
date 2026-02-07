@@ -581,7 +581,11 @@ func TestCompareFiles_LocalNewer(t *testing.T) {
 	// Create dotfiles first
 	os.WriteFile(dotfilesFile, []byte("old"), 0644)
 
-	// Wait and create local file
+	// Set dotfiles to an older time
+	oldTime := time.Now().Add(-2 * time.Second)
+	os.Chtimes(dotfilesFile, oldTime, oldTime)
+
+	// Create local file (will have current time, newer than dotfiles)
 	os.WriteFile(localFile, []byte("new"), 0644)
 
 	status := CompareFiles(localFile, dotfilesFile)
