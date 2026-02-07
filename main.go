@@ -2351,8 +2351,8 @@ func (m *Model) renderHelp() string {
 		{"●", "Modified - Local has changes (push)"},
 		{"○", "Outdated - Dotfiles has updates (pull)"},
 		{"⚡", "Conflict - Both sides changed"},
-		{"[S]", "Sync mode - Same on all machines"},
-		{"[B]", "Backup mode - Per-machine storage"},
+		{"[B]", "Backup only - Per-machine storage"},
+		{"[B+S]", "Backup + Sync - Same on all machines"},
 	}
 	for _, icon := range statusIcons {
 		b.WriteString(fmt.Sprintf("  %s  %s\n",
@@ -2365,13 +2365,13 @@ func (m *Model) renderHelp() string {
 	b.WriteString("\n")
 	b.WriteString(ui.PanelTitleStyle.Render("💡 Cách hoạt động"))
 	b.WriteString("\n\n")
-	b.WriteString(ui.MutedStyle.Render("  Backup mode [B]:"))
+	b.WriteString(ui.MutedStyle.Render("  Backup [B]:"))
 	b.WriteString("\n")
 	b.WriteString("    • Mỗi máy có folder riêng: dotfiles/app/{machine}/\n")
 	b.WriteString("    • Nhấn Q → tự động push lên folder của máy này\n")
 	b.WriteString("    • Dùng R để restore config từ máy khác\n")
 	b.WriteString("\n")
-	b.WriteString(ui.MutedStyle.Render("  Sync mode [S]:"))
+	b.WriteString(ui.MutedStyle.Render("  Backup + Sync [B+S]:"))
 	b.WriteString("\n")
 	b.WriteString("    • Một bản duy nhất: dotfiles/app/file\n")
 	b.WriteString("    • Nhấn p để push, l để pull (thủ công)\n")
