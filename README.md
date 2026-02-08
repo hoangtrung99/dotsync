@@ -111,6 +111,7 @@ That's it! Your dotfiles are now synced.
 | Select app/file | `Space` |
 | Select all modified | `M` |
 | Select all outdated | `O` |
+| Add custom folder/app source | `+` |
 | Push to dotfiles | `p` |
 | Pull from dotfiles | `l` |
 | View file diff | `d` |
@@ -184,6 +185,7 @@ The status bar at the bottom shows:
 | `D` | Deselect all |
 | `M` | Select all modified items |
 | `O` | Select all outdated items (need pull) |
+| `+` | Add custom folder/app source |
 | `u` | Undo last selection change |
 
 **Category Shortcuts:**
@@ -324,15 +326,34 @@ Config file location: `~/.config/dotsync/dotsync.json`
 
 ### Custom Apps
 
-You can define custom apps in `~/.config/dotsync/apps.yaml`:
+You can add custom sources directly in the Apps panel:
+
+1. Focus Apps panel
+2. Press `+`
+3. Choose mode (`folder` or `app`)
+4. Enter name and path(s)
+5. Press `Enter` to save and rescan
+
+Dotsync stores them in `~/.config/dotsync/apps.yaml`.
+
+You can also edit this file manually:
 
 ```yaml
 apps:
   - id: myapp
     name: My Custom App
-    paths:
+    category: custom
+    icon: "📁"
+    config_paths:
       - ~/.config/myapp
       - ~/.myapprc
+
+  - id: hammerspoon
+    name: Hammerspoon
+    category: custom
+    icon: "📁"
+    config_paths:
+      - ~/.hammerspoon
 ```
 
 ## Supported Apps
@@ -596,7 +617,7 @@ Total: 390 unit tests (484 test runs including sub-tests)
 
 **Q: Dotsync doesn't detect my app**
 - Check if the app's config files exist in the expected location
-- You can add custom apps in `~/.config/dotsync/apps.yaml`
+- Add a custom source with `+` in the Apps panel, or edit `~/.config/dotsync/apps.yaml`
 
 **Q: Git operations fail**
 - Ensure your dotfiles directory is a git repository (`git init`)

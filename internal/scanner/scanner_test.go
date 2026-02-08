@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"dotsync/internal/models"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestNew(t *testing.T) {
@@ -467,5 +469,87 @@ func TestCollectFiles_SingleFile(t *testing.T) {
 
 	if len(files) != 1 {
 		t.Errorf("Expected 1 file, got %d", len(files))
+	}
+}
+
+func TestScan_UsesDefaultCustomConfigWhenAppsConfigEmpty(t *testing.T) {
+	tmpHome := t.TempDir()
+	customPath := filepath.Join(tmpHome, ".config", "dotsync", "apps.yaml")
+	if err := os.MkdirAll(filepath.Dir(customPath), 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+
+	cfg := models.AppConfig{Apps: []models.AppDefinition{{
+		ID:          "custom-scan-app",
+		Name:        "Custom Scan App",
+		Category:    "custom",
+		Icon:        "📁",
+		ConfigPaths: []string{"~/.does-not-exist"},
+	}}}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("yaml marshal failed: %v", err)
+	}
+	if err := os.WriteFile(customPath, data, 0644); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	s := New("")
+	s.homeDir = tmpHome
+
+	defs, err := s.loadCustomDefinitions()
+	if err != nil {
+		t.Fatalf("loadCustomDefinitions failed: %v", err)
+	}
+
+	if len(defs) != 1 {
+		t.Fatalf("expected 1 custom definition, got %d", len(defs))
+	}
+	if defs[0].ID != "custom-scan-app" {
+		t.Fatalf("unexpected custom id: %s", defs[0].ID)
+	}
+}
+
+func TestScan_CustomDefinitionOverridesBuiltinOnSameID(t *testing.T) {
+	builtin := []models.AppDefinition{{
+		ID:          "zsh",
+		Name:        "Zsh",
+		Category:    "shell",
+		Icon:        "🐚",
+		ConfigPaths: []string{"~/.zshrc"},
+	}}
+
+	custom := []models.AppDefinition{{
+		ID:          "zsh",
+		Name:        "Zsh Custom",
+		Category:    "custom",
+		Icon:        "📁",
+		ConfigPaths: []string{"~/.zshrc.custom"},
+	}}
+
+	merged := mergeDefinitions(builtin, custom)
+	if len(merged) != 1 {
+		t.Fatalf("expected 1 merged definition, got %d", len(merged))
+	}
+	if merged[0].Name != "Zsh Custom" {
+		t.Fatalf("expected custom override, got %s", merged[0].Name)
+	}
+}
+
+func TestScan_MergesBuiltinAndCustomDefinitions(t *testing.T) {
+	builtin := []models.AppDefinition{{ID: "zsh", Name: "Zsh", ConfigPaths: []string{"~/.zshrc"}}}
+	custom := []models.AppDefinition{{ID: "custom-hs", Name: "Hammerspoon", ConfigPaths: []string{"~/.hammerspoon"}}}
+
+	merged := mergeDefinitions(builtin, custom)
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 merged definitions, got %d", len(merged))
+	}
+
+	ids := map[string]bool{}
+	for _, d := range merged {
+		ids[d.ID] = true
+	}
+	if !ids["zsh"] || !ids["custom-hs"] {
+		t.Fatalf("missing IDs in merged list: %#v", ids)
 	}
 }

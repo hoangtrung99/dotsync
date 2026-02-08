@@ -38,20 +38,27 @@ make test
 
 ## Adding New App Definitions
 
-To add support for a new application, edit `internal/scanner/scanner.go`:
+For built-in app support, edit `configs/apps.yaml`:
 
-```go
-{
-    ID:       "myapp",
-    Name:     "My App",
-    Category: "dev",
-    Icon:     "📱",
-    ConfigPaths: []string{
-        "~/.config/myapp",
-        "~/.myapprc",
-    },
-},
+```yaml
+apps:
+  - id: myapp
+    name: My App
+    category: dev
+    icon: "📱"
+    config_paths:
+      - ~/.config/myapp
+      - ~/.myapprc
 ```
+
+For user-specific custom sources, Dotsync writes to `~/.config/dotsync/apps.yaml`
+via the `+` action in the Apps panel. Schema is the same (`config_paths`).
+
+Validation expectations:
+- `id` must be unique within custom apps file
+- `name` is required
+- at least one `config_paths` entry is required
+- use `category: custom` for user-defined entries
 
 ### Categories
 

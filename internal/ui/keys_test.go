@@ -38,6 +38,7 @@ func TestDefaultKeyMap(t *testing.T) {
 		{"PrevHunk", km.PrevHunk},
 		{"KeepLocal", km.KeepLocal},
 		{"UseDotfiles", km.UseDotfiles},
+		{"AddCustom", km.AddCustom},
 	}
 
 	for _, b := range bindings {
@@ -50,6 +51,41 @@ func TestDefaultKeyMap(t *testing.T) {
 		if b.binding.Help().Desc == "" {
 			t.Errorf("%s binding should have help description", b.name)
 		}
+	}
+}
+
+func TestDefaultKeyMap_HasAddCustomBinding(t *testing.T) {
+	km := DefaultKeyMap()
+	if len(km.AddCustom.Keys()) == 0 {
+		t.Fatalf("AddCustom should define at least one key")
+	}
+	if km.AddCustom.Keys()[0] != "+" {
+		t.Fatalf("AddCustom key should be '+', got %q", km.AddCustom.Keys()[0])
+	}
+	if km.AddCustom.Help().Desc == "" {
+		t.Fatal("AddCustom should have help description")
+	}
+}
+
+func TestFullHelp_IncludesAddCustomBinding(t *testing.T) {
+	km := DefaultKeyMap()
+	groups := km.FullHelp()
+
+	found := false
+	for _, group := range groups {
+		for _, b := range group {
+			if len(b.Keys()) > 0 && b.Keys()[0] == "+" {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		t.Fatal("FullHelp should include AddCustom binding")
 	}
 }
 

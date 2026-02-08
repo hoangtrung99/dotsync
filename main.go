@@ -10,6 +10,7 @@ import (
 
 	"dotsync/internal/brew"
 	"dotsync/internal/config"
+	"dotsync/internal/customapps"
 	"dotsync/internal/git"
 	"dotsync/internal/models"
 	"dotsync/internal/scanner"
@@ -56,17 +57,18 @@ const (
 	ScreenSetup Screen = iota
 	ScreenMain
 	ScreenScanning
-	ScreenSyncing    // Sync progress screen
-	ScreenConfirm    // Confirmation screen before pull
+	ScreenSyncing // Sync progress screen
+	ScreenConfirm // Confirmation screen before pull
 	ScreenHelp
-	ScreenDiff       // Diff viewer screen
-	ScreenGit        // Git operations screen
-	ScreenMerge      // Merge conflict resolution screen
-	ScreenCommit     // Commit message input screen
-	ScreenPreview    // File preview screen
-	ScreenSettings   // Settings screen
-	ScreenRestore    // Restore from another machine
-	ScreenQuickSync  // Quick sync progress/result
+	ScreenDiff      // Diff viewer screen
+	ScreenGit       // Git operations screen
+	ScreenMerge     // Merge conflict resolution screen
+	ScreenCommit    // Commit message input screen
+	ScreenPreview   // File preview screen
+	ScreenSettings  // Settings screen
+	ScreenAddCustom // Add custom folder/app source
+	ScreenRestore   // Restore from another machine
+	ScreenQuickSync // Quick sync progress/result
 )
 
 // Panel represents which panel is focused
@@ -93,6 +95,14 @@ const (
 	SettingsDotfilesPath SettingsField = iota
 	SettingsBackupPath
 	SettingsFieldCount // Used to wrap around
+)
+
+// AddCustomStep represents steps in add custom source flow
+type AddCustomStep int
+
+const (
+	AddCustomStepName AddCustomStep = iota
+	AddCustomStepPaths
 )
 
 // SyncAction represents the type of sync action
@@ -154,6 +164,11 @@ type Model struct {
 	settingsField   SettingsField
 	settingsEditing bool // Whether we're editing a field
 
+	// Add custom source screen
+	addCustomStep AddCustomStep
+	addCustomMode string
+	addCustomName string
+
 	// Confirmation dialog
 	confirmAction SyncAction
 	confirmCursor int
@@ -187,9 +202,9 @@ type Model struct {
 	quickSyncResult *quicksync.Result
 
 	// New: Restore dialog state
-	restoreMachines     []backup.Machine
-	restoreFiles        []backup.RestorableFile
-	restoreCursor       int
+	restoreMachines        []backup.Machine
+	restoreFiles           []backup.RestorableFile
+	restoreCursor          int
 	restoreSelectedMachine string
 
 	err error
@@ -741,6 +756,8 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case ScreenSettings:
 		return m.handleSettingsKeys(msg)
+	case ScreenAddCustom:
+		return m.handleAddCustomKeys(msg)
 	case ScreenScanning:
 		if key.Matches(msg, m.keys.Quit) {
 			return m, tea.Quit
@@ -860,6 +877,9 @@ func (m *Model) handleMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Brewfile):
 		return m.handleBrewfile()
+
+	case key.Matches(msg, m.keys.AddCustom):
+		return m.handleAddCustom()
 
 	case msg.String() == ",": // Comma for Settings (like Vim/tmux convention)
 		return m.handleSettings()
@@ -1254,6 +1274,101 @@ func (m *Model) handleSettingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) handleAddCustom() (tea.Model, tea.Cmd) {
+	if m.focusedPanel != PanelApps {
+		m.status = "Switch to Apps panel to add custom source"
+		return m, nil
+	}
+
+	m.screen = ScreenAddCustom
+	m.addCustomStep = AddCustomStepName
+	m.addCustomMode = "folder"
+	m.addCustomName = ""
+	m.textInput.SetValue("")
+	m.textInput.Placeholder = "Enter source name (e.g. Hammerspoon)"
+	m.textInput.Focus()
+	m.status = "Add custom source"
+	return m, textinput.Blink
+}
+
+func (m *Model) handleAddCustomKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.textInput.Blur()
+		m.screen = ScreenMain
+		m.status = "Cancelled adding custom source"
+		return m, nil
+
+	case "tab":
+		if m.addCustomMode == "folder" {
+			m.addCustomMode = "app"
+		} else {
+			m.addCustomMode = "folder"
+		}
+		return m, nil
+
+	case "enter":
+		if m.addCustomStep == AddCustomStepName {
+			name := strings.TrimSpace(m.textInput.Value())
+			if name == "" {
+				m.status = "Name is required"
+				return m, nil
+			}
+			m.addCustomName = name
+			m.addCustomStep = AddCustomStepPaths
+			if m.addCustomMode == "folder" {
+				m.textInput.Placeholder = "Enter one path (e.g. ~/.hammerspoon)"
+			} else {
+				m.textInput.Placeholder = "Enter path(s), comma-separated"
+			}
+			m.textInput.SetValue("")
+			m.status = "Enter path(s)"
+			return m, nil
+		}
+
+		paths := parsePathsInput(m.textInput.Value())
+		def, err := customapps.BuildDefinition(customapps.FormInput{
+			Mode:  m.addCustomMode,
+			Name:  m.addCustomName,
+			Paths: paths,
+		})
+		if err != nil {
+			m.status = fmt.Sprintf("Error: %v", err)
+			return m, nil
+		}
+
+		storePath := m.config.AppsConfig
+		store := customapps.New(storePath)
+		if err := store.Add(def); err != nil {
+			m.status = fmt.Sprintf("Error: %v", err)
+			return m, nil
+		}
+
+		m.textInput.Blur()
+		m.screen = ScreenScanning
+		m.status = fmt.Sprintf("Added custom source %q, rescanning...", def.Name)
+		return m, m.scanApps
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func parsePathsInput(input string) []string {
+	parts := strings.FieldsFunc(input, func(r rune) bool {
+		return r == ',' || r == '\n'
+	})
+	paths := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
 func (m *Model) handlePreview() (tea.Model, tea.Cmd) {
 	// Only preview when in Files panel
 	if m.focusedPanel != PanelFiles {
@@ -1621,6 +1736,8 @@ func (m *Model) View() string {
 		return m.renderPreview()
 	case ScreenSettings:
 		return m.renderSettings()
+	case ScreenAddCustom:
+		return m.renderAddCustom()
 	default:
 		return m.renderMain()
 	}
@@ -2088,6 +2205,13 @@ func (m *Model) renderHelpBar() string {
 			ui.RenderHelpItem(scrollPct, ""),
 		}
 		return ui.HelpBarStyle.Render(strings.Join(items, "  "))
+	case ScreenAddCustom:
+		items := []string{
+			ui.RenderHelpItem("Enter", "next/save"),
+			ui.RenderHelpItem("Tab", "mode"),
+			ui.RenderHelpItem("Esc", "cancel"),
+		}
+		return ui.HelpBarStyle.Render("➕ Add custom source  " + strings.Join(items, "  "))
 	}
 
 	// Show different help bar when in search mode
@@ -2151,6 +2275,7 @@ func (m *Model) renderHelpBar() string {
 				ui.RenderHelpItem("a", "all"),
 				ui.RenderHelpItem("M", "mod"),
 				ui.RenderHelpItem("O", "outdated"),
+				ui.RenderHelpItem("+", "add custom"),
 				ui.RenderHelpItem("/", "search"),
 				ui.RenderHelpItem("1-9", "filter"),
 				ui.RenderHelpItem("?", "help"),
@@ -2273,6 +2398,7 @@ func (m *Model) renderHelp() string {
 		{"D", "Deselect all"},
 		{"M", "Select all modified (need push)"},
 		{"O", "Select all outdated (need pull)"},
+		{"+", "Add custom folder/app source"},
 		{"u", "Undo last selection"},
 	}
 	for _, bind := range selBindings {
@@ -2528,6 +2654,70 @@ func (m *Model) renderSettings() string {
 	// Current config file path
 	b.WriteString("\n\n")
 	b.WriteString(helpStyle.Render("Config file: " + config.ConfigPath()))
+
+	box := style.Render(b.String())
+
+	return lipgloss.Place(
+		m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		box,
+	)
+}
+
+func (m *Model) renderAddCustom() string {
+	width := 74
+	style := lipgloss.NewStyle().
+		Width(width).
+		Padding(1, 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ui.Primary)
+
+	var b strings.Builder
+
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ui.Primary).
+		Render("➕ Add Custom Source")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+
+	mode := "[Folder]"
+	if m.addCustomMode == "app" {
+		mode = "[App]"
+	}
+	b.WriteString("Mode: ")
+	b.WriteString(ui.SelectedItemStyle.Render(mode))
+	b.WriteString("  ")
+	b.WriteString(ui.MutedStyle.Render("(Tab to switch)"))
+	b.WriteString("\n\n")
+
+	b.WriteString("Name: ")
+	if m.addCustomStep == AddCustomStepName {
+		b.WriteString(m.textInput.View())
+	} else {
+		b.WriteString(ui.ItemStyle.Render(m.addCustomName))
+	}
+	b.WriteString("\n")
+
+	b.WriteString("Path(s): ")
+	if m.addCustomStep == AddCustomStepPaths {
+		b.WriteString(m.textInput.View())
+	} else {
+		if m.addCustomMode == "folder" {
+			b.WriteString(ui.MutedStyle.Render("~/.my-folder"))
+		} else {
+			b.WriteString(ui.MutedStyle.Render("~/.config/app, ~/.appconfig"))
+		}
+	}
+	b.WriteString("\n\n")
+
+	b.WriteString(ui.MutedStyle.Render("Notes:"))
+	b.WriteString("\n")
+	b.WriteString(ui.MutedStyle.Render("• Folder mode expects exactly 1 path"))
+	b.WriteString("\n")
+	b.WriteString(ui.MutedStyle.Render("• App mode supports 1 or more comma-separated paths"))
+	b.WriteString("\n\n")
+	b.WriteString(ui.HelpBarStyle.Render("Enter: next/save  •  Tab: switch mode  •  Esc: cancel"))
 
 	box := style.Render(b.String())
 

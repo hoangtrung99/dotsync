@@ -103,11 +103,10 @@ func (s *Scanner) Scan() ([]*models.App, error) {
 	start := time.Now()
 	debugLog("Starting scan...")
 
-	// Load app definitions
-	defs, err := s.loadDefinitions()
-	if err != nil {
-		// If no config file, use built-in definitions
-		defs = s.getBuiltinDefinitions()
+	// Load app definitions (built-in + optional custom overrides)
+	defs := s.getBuiltinDefinitions()
+	if customDefs, err := s.loadCustomDefinitions(); err == nil {
+		defs = mergeDefinitions(defs, customDefs)
 	}
 	debugLog("Loaded %d app definitions in %v", len(defs), time.Since(start))
 
@@ -10290,9 +10289,9 @@ func (s *Scanner) getBuiltinDefinitions() []models.AppDefinition {
 
 // ScanAll returns all apps including not installed ones
 func (s *Scanner) ScanAll() ([]*models.App, error) {
-	defs, err := s.loadDefinitions()
-	if err != nil {
-		defs = s.getBuiltinDefinitions()
+	defs := s.getBuiltinDefinitions()
+	if customDefs, err := s.loadCustomDefinitions(); err == nil {
+		defs = mergeDefinitions(defs, customDefs)
 	}
 
 	var apps []*models.App
@@ -10317,6 +10316,52 @@ func (s *Scanner) ScanAll() ([]*models.App, error) {
 	}
 
 	return apps, nil
+}
+
+// definitionsPath returns the custom definitions file path.
+func (s *Scanner) definitionsPath() string {
+	if strings.TrimSpace(s.configPath) != "" {
+		return s.configPath
+	}
+	return filepath.Join(s.homeDir, ".config", "dotsync", "apps.yaml")
+}
+
+// loadCustomDefinitions loads custom app definitions from user config file.
+func (s *Scanner) loadCustomDefinitions() ([]models.AppDefinition, error) {
+	path := s.definitionsPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var config models.AppConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	return config.Apps, nil
+}
+
+// mergeDefinitions merges built-in definitions with custom ones.
+// Custom definitions override built-ins with the same ID.
+func mergeDefinitions(builtin, custom []models.AppDefinition) []models.AppDefinition {
+	merged := make([]models.AppDefinition, len(builtin))
+	copy(merged, builtin)
+
+	indexByID := make(map[string]int, len(merged))
+	for i, def := range merged {
+		indexByID[def.ID] = i
+	}
+
+	for _, def := range custom {
+		if idx, exists := indexByID[def.ID]; exists {
+			merged[idx] = def
+			continue
+		}
+		indexByID[def.ID] = len(merged)
+		merged = append(merged, def)
+	}
+
+	return merged
 }
 
 // loadDefinitions loads app definitions from YAML

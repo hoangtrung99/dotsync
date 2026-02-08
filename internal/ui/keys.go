@@ -37,6 +37,7 @@ type KeyMap struct {
 	Refresh     key.Binding // Refresh current view
 	Undo        key.Binding // Undo last selection change
 	Preview     key.Binding // Preview file content
+	AddCustom   key.Binding // Add custom folder/app source
 
 	// Quick Sync & Mode keys
 	QuickSync     key.Binding // Quick backup (backup all + commit)
@@ -181,6 +182,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("v", "enter"),
 			key.WithHelp("v/enter", "preview"),
 		),
+		AddCustom: key.NewBinding(
+			key.WithKeys("+"),
+			key.WithHelp("+", "add custom"),
+		),
 
 		// Quick Sync & Mode keys
 		QuickSync: key.NewBinding(
@@ -221,7 +226,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		// Quick Selection
 		{k.SelectMod, k.SelectOut, k.Refresh, k.Undo},
 		// Quick Sync & Mode
-		{k.QuickSync, k.ToggleMode},
+		{k.QuickSync, k.ToggleMode, k.AddCustom},
 		// Sync Operations
 		{k.Push, k.Pull, k.Scan, k.Brewfile, k.Restore},
 		// Diff & Merge
